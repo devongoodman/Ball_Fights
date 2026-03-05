@@ -4678,6 +4678,961 @@ def run_tournament(bracket, arena_idx, realistic=False):
     show_bracket_screen(rounds, len(rounds) - 1, 0, f"Champion: {champ_str}!  Click to return to menu")
 
 
+# ── Interactive Roguelike Mode ─────────────────────────────
+def interactive_mode():
+    global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
+
+    ROLE_PRICES = {
+        "zombie": 25,
+        "swordsman": 40, "spearman": 40, "trapper": 40,
+        "berserker": 50, "chainsaw": 50, "charger": 50, "bomber": 50,
+        "vampire": 60, "archer": 60, "fortifier": 60, "ice_mage": 60,
+        "ninja": 75, "assassin": 75, "shield": 75, "wizard": 75, "summoner": 75,
+        "sniper": 80, "mimic": 80, "mirror": 80,
+        "healer": 100, "necromancer": 100, "tank": 100,
+    }
+    HEAL_POTION_COST = 30
+    SHOP_ROLES = [
+        "zombie", "swordsman", "spearman", "trapper",
+        "berserker", "chainsaw", "charger", "bomber",
+        "vampire", "archer", "fortifier", "ice_mage",
+        "ninja", "assassin", "shield", "wizard", "summoner",
+        "sniper", "mimic", "mirror",
+        "healer", "necromancer", "tank",
+    ]
+
+    def get_arena_size(total):
+        if total <= 3:
+            return 450, 340
+        elif total <= 6:
+            return 600, 450
+        elif total <= 10:
+            return 660, 495
+        elif total <= 16:
+            return 720, 540
+        elif total <= 24:
+            return 792, 594
+        elif total <= 35:
+            return 860, 645
+        else:
+            return 960, 720
+
+    def get_enemy_wave(wave):
+        if wave <= 3:
+            pool = ["zombie", "swordsman", "spearman"]
+            count = random.randint(1, 2) + wave // 3
+        elif wave <= 6:
+            pool = ["zombie", "swordsman", "spearman", "trapper", "bomber", "berserker", "chainsaw"]
+            count = random.randint(2, 3) + wave // 3
+        elif wave <= 10:
+            pool = ["zombie", "swordsman", "spearman", "trapper", "bomber", "berserker", "chainsaw",
+                    "vampire", "archer", "fortifier", "ice_mage", "charger"]
+            count = random.randint(3, 5) + wave // 3
+        elif wave <= 15:
+            pool = ["zombie", "swordsman", "spearman", "trapper", "bomber", "berserker", "chainsaw",
+                    "vampire", "archer", "fortifier", "ice_mage", "charger",
+                    "ninja", "assassin", "shield", "wizard", "summoner"]
+            count = random.randint(4, 6) + wave // 3
+        else:
+            pool = list(SHOP_ROLES)
+            count = random.randint(5, 8) + wave // 3
+        return [random.choice(pool) for _ in range(count)]
+
+    # ── shop screen ──
+    def shop_screen(player_team, gold, wave, next_enemies):
+        global WIDTH, HEIGHT, screen
+        # size the shop screen to fit content
+        shop_w = max(800, 220 + len(SHOP_ROLES) * 52)
+        shop_h = max(500, 160 + max(len(player_team), len(next_enemies)) * 48 + 140)
+        WIDTH, HEIGHT = shop_w, shop_h
+        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+        selected_ball = None
+        scroll_offset = 0
+        max_visible = max(1, (WIDTH - 240) // 52)
+        max_scroll = max(0, len(SHOP_ROLES) - max_visible)
+        message = ""
+        message_timer = 0
+
+        while True:
+            mx, my = pygame.mouse.get_pos()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 4:
+                    scroll_offset = max(0, scroll_offset - 1)
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 5:
+                    scroll_offset = min(max_scroll, scroll_offset + 1)
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    # fight button
+                    fight_rect = pygame.Rect(WIDTH // 2 - 130, HEIGHT - 50, 120, 40)
+                    if fight_rect.collidepoint(mx, my) and len(player_team) > 0:
+                        return "fight", player_team, gold
+                    # quit button
+                    quit_rect = pygame.Rect(WIDTH // 2 + 10, HEIGHT - 50, 120, 40)
+                    if quit_rect.collidepoint(mx, my):
+                        return "quit", player_team, gold
+
+                    # click on player ball to select
+                    for i, info in enumerate(player_team):
+                        bx, by = 55, 120 + i * 48
+                        if (mx - bx) ** 2 + (my - by) ** 2 <= (BALL_RADIUS + 8) ** 2:
+                            selected_ball = i
+                            break
+
+                    # heal button
+                    if selected_ball is not None and 0 <= selected_ball < len(player_team):
+                        heal_rect = pygame.Rect(140, 120 + selected_ball * 48 - 14, 50, 28)
+                        if heal_rect.collidepoint(mx, my):
+                            info = player_team[selected_ball]
+                            max_hp = TANK_HP if info["role"] == "tank" else 100
+                            if gold >= HEAL_POTION_COST and info["hp"] < max_hp:
+                                gold -= HEAL_POTION_COST
+                                info["hp"] = max_hp
+                                message = f"Healed {info['role'].capitalize()}!"
+                                message_timer = 120
+
+                    # buy role
+                    buy_y = HEIGHT - 100
+                    for idx in range(len(SHOP_ROLES)):
+                        vi = idx - scroll_offset
+                        if vi < 0 or vi >= max_visible:
+                            continue
+                        rx = 120 + vi * 52
+                        role_rect = pygame.Rect(rx, buy_y, 48, 60)
+                        if role_rect.collidepoint(mx, my):
+                            role = SHOP_ROLES[idx]
+                            price = ROLE_PRICES[role]
+                            if gold >= price:
+                                gold -= price
+                                max_hp = TANK_HP if role == "tank" else 100
+                                player_team.append({"role": role, "hp": max_hp})
+                                message = f"Bought {role.capitalize()}! (-{price}g)"
+                                message_timer = 120
+                            else:
+                                message = f"Not enough gold! Need {price}g"
+                                message_timer = 120
+                            break
+
+            # ── draw shop ──
+            screen.fill((24, 24, 36))
+
+            # title
+            title = title_font.render(f"Wave {wave}", True, (255, 255, 255))
+            screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 12))
+            gold_text = font.render(f"Gold: {gold}", True, (255, 215, 80))
+            screen.blit(gold_text, (WIDTH // 2 - gold_text.get_width() // 2, 52))
+
+            # left panel: your team
+            panel_h = max(200, len(player_team) * 48 + 40)
+            pygame.draw.rect(screen, (35, 40, 55), (10, 90, 195, panel_h), border_radius=8)
+            team_label = font.render("Your Team", True, (120, 200, 255))
+            screen.blit(team_label, (55, 95))
+            for i, info in enumerate(player_team):
+                bx, by = 55, 120 + i * 48
+                role = info["role"]
+                hp = info["hp"]
+                max_hp = TANK_HP if role == "tank" else 100
+                c = TEAM_COLORS[0]
+                # ball
+                pygame.draw.circle(screen, c, (bx, by), 14)
+                if selected_ball == i:
+                    pygame.draw.circle(screen, (255, 255, 100), (bx, by), 17, 2)
+                # role name
+                rl = small_font.render(role.capitalize(), True, (220, 220, 255))
+                screen.blit(rl, (bx + 20, by - 14))
+                # hp bar
+                bar_w = 70
+                bar_x = bx + 20
+                bar_y = by + 4
+                pygame.draw.rect(screen, (50, 50, 50), (bar_x, bar_y, bar_w, 6))
+                hp_frac = max(0, hp / max_hp)
+                bar_color = (0, 200, 0) if hp_frac > 0.4 else (200, 200, 0) if hp_frac > 0.2 else (200, 0, 0)
+                pygame.draw.rect(screen, bar_color, (bar_x, bar_y, int(bar_w * hp_frac), 6))
+                hp_label = small_font.render(f"{hp}/{max_hp}", True, (180, 180, 180))
+                screen.blit(hp_label, (bar_x + bar_w + 4, bar_y - 4))
+
+            # heal button for selected
+            if selected_ball is not None and 0 <= selected_ball < len(player_team):
+                heal_rect = pygame.Rect(140, 120 + selected_ball * 48 - 14, 50, 28)
+                hc = (60, 180, 60) if heal_rect.collidepoint(mx, my) else (50, 140, 50)
+                pygame.draw.rect(screen, hc, heal_rect, border_radius=4)
+                hl = small_font.render(f"Heal", True, (255, 255, 255))
+                screen.blit(hl, (heal_rect.centerx - hl.get_width() // 2, heal_rect.centery - hl.get_height() // 2))
+                price_l = small_font.render(f"{HEAL_POTION_COST}g", True, (255, 215, 80))
+                screen.blit(price_l, (heal_rect.right + 4, heal_rect.centery - price_l.get_height() // 2))
+
+            # right panel: enemy preview
+            epanel_x = WIDTH - 195
+            epanel_h = max(200, len(next_enemies) * 40 + 40)
+            pygame.draw.rect(screen, (55, 35, 35), (epanel_x, 90, 185, epanel_h), border_radius=8)
+            enemy_label = font.render("Next Wave", True, (255, 120, 120))
+            screen.blit(enemy_label, (epanel_x + 40, 95))
+            for i, role in enumerate(next_enemies):
+                ey = 120 + i * 40
+                pygame.draw.circle(screen, TEAM_COLORS[1], (epanel_x + 30, ey), 12)
+                rl = small_font.render(role.capitalize(), True, (255, 180, 180))
+                screen.blit(rl, (epanel_x + 50, ey - 8))
+
+            # bottom: shop row
+            buy_y = HEIGHT - 100
+            pygame.draw.rect(screen, (30, 30, 48), (110, buy_y - 8, WIDTH - 220, 76), border_radius=8)
+            shop_label = small_font.render("Buy Units:", True, (180, 180, 200))
+            screen.blit(shop_label, (120, buy_y - 22))
+            # scroll arrows
+            if scroll_offset > 0:
+                arrow_l = font.render("<", True, (200, 200, 200))
+                screen.blit(arrow_l, (112, buy_y + 18))
+            if scroll_offset < max_scroll:
+                arrow_r = font.render(">", True, (200, 200, 200))
+                screen.blit(arrow_r, (WIDTH - 118, buy_y + 18))
+            for idx in range(len(SHOP_ROLES)):
+                vi = idx - scroll_offset
+                if vi < 0 or vi >= max_visible:
+                    continue
+                rx = 120 + vi * 52
+                role = SHOP_ROLES[idx]
+                price = ROLE_PRICES[role]
+                role_rect = pygame.Rect(rx, buy_y, 48, 60)
+                can_afford = gold >= price
+                bg = (50, 60, 80) if can_afford else (40, 35, 35)
+                if role_rect.collidepoint(mx, my) and can_afford:
+                    bg = (70, 80, 110)
+                pygame.draw.rect(screen, bg, role_rect, border_radius=4)
+                pygame.draw.rect(screen, (120, 120, 140), role_rect, 1, border_radius=4)
+                # role name (abbreviated to fit)
+                name = role[:6].capitalize()
+                nl = small_font.render(name, True, (255, 255, 255) if can_afford else (120, 120, 120))
+                screen.blit(nl, (rx + 24 - nl.get_width() // 2, buy_y + 6))
+                # price
+                pl = small_font.render(f"{price}g", True, (255, 215, 80) if can_afford else (100, 90, 50))
+                screen.blit(pl, (rx + 24 - pl.get_width() // 2, buy_y + 40))
+
+            # fight / quit buttons
+            fight_rect = pygame.Rect(WIDTH // 2 - 130, HEIGHT - 50, 120, 40)
+            quit_rect = pygame.Rect(WIDTH // 2 + 10, HEIGHT - 50, 120, 40)
+            fc = (60, 180, 60) if fight_rect.collidepoint(mx, my) else (50, 150, 50)
+            qc = (180, 60, 60) if quit_rect.collidepoint(mx, my) else (150, 50, 50)
+            pygame.draw.rect(screen, fc, fight_rect, border_radius=6)
+            pygame.draw.rect(screen, qc, quit_rect, border_radius=6)
+            fl = font.render("FIGHT!", True, (255, 255, 255))
+            ql = font.render("QUIT", True, (255, 255, 255))
+            screen.blit(fl, (fight_rect.centerx - fl.get_width() // 2, fight_rect.centery - fl.get_height() // 2))
+            screen.blit(ql, (quit_rect.centerx - ql.get_width() // 2, quit_rect.centery - ql.get_height() // 2))
+
+            # message
+            if message_timer > 0:
+                message_timer -= 1
+                msg = font.render(message, True, (255, 255, 180))
+                screen.blit(msg, (WIDTH // 2 - msg.get_width() // 2, HEIGHT - 140))
+
+            pygame.display.flip()
+            clock.tick(60)
+
+    # ── battle ──
+    def run_battle(player_team, enemy_roles):
+        global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
+
+        total = len(player_team) + len(enemy_roles)
+        aw, ah = get_arena_size(total)
+        WIDTH, HEIGHT = aw, ah
+        if total > 6:
+            BALL_RADIUS = max(12, BASE_BALL_RADIUS - (total - 6) * 2)
+        else:
+            BALL_RADIUS = BASE_BALL_RADIUS
+        SWORD_LENGTH = BALL_RADIUS * 2
+        TRAP_RADIUS = BALL_RADIUS * 4
+        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+        # spawn player balls with HP overrides
+        configs = []
+        for info in player_team:
+            configs.append({"team_id": 0, "role": info["role"]})
+        for role in enemy_roles:
+            configs.append({"team_id": 1, "role": role})
+        balls = spawn_balls(configs)
+        # apply saved HP to player balls
+        pi = 0
+        for b in balls:
+            if b.team_id == 0 and pi < len(player_team):
+                b.hp = player_team[pi]["hp"]
+                pi += 1
+
+        spears, traps, bombs, bullets, arrows, orbs, ice_bolts, walls = [], [], [], [], [], [], [], []
+        speed_options = [1, 2, 4, 10]
+        speed_index = 0
+        paused = False
+        winner_team = None
+        stale_timer = 0
+        STALE_THRESHOLD = 7200
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        paused = not paused
+                    if event.key == pygame.K_1:
+                        speed_index = 0
+                    if event.key == pygame.K_2:
+                        speed_index = 1
+                    if event.key == pygame.K_3:
+                        speed_index = 2
+                    if event.key == pygame.K_4:
+                        speed_index = 3
+
+            if winner_team is not None:
+                # return survivors
+                survivors = []
+                for b in balls:
+                    if b.team_id == 0 and b.alive:
+                        survivors.append({"role": b.role, "hp": b.hp})
+                return survivors, (winner_team == 0)
+
+            game_speed = speed_options[speed_index]
+
+            for _tick in range(game_speed):
+                if winner_team is not None or paused:
+                    break
+
+                stale_timer += 1
+                if stale_timer >= STALE_THRESHOLD:
+                    # mutate: replace one unit from each team with random melee
+                    melee_list = list(Ball.MELEE_ROLES)
+                    alive_teams_map = {}
+                    for b in balls:
+                        if b.alive:
+                            alive_teams_map.setdefault(b.team_id, []).append(b)
+                    for tid, members in alive_teams_map.items():
+                        victim = random.choice(members)
+                        victim.alive = False
+                        victim.hp = 0
+                        new_role = random.choice(melee_list)
+                        color = TEAM_COLORS[tid % len(TEAM_COLORS)]
+                        new_ball = Ball(victim.x, victim.y, color, tid, new_role)
+                        balls.append(new_ball)
+                    stale_timer = 0
+
+                alive_balls = [b for b in balls if b.alive]
+                for b in alive_balls:
+                    target = b.find_target(alive_balls)
+                    b.seek(target, alive_balls)
+                    b.move()
+                    b.try_throw_spear(target, spears)
+                    b.try_place_trap(target, traps)
+                    b.try_drop_bomb(target, bombs)
+                    b.try_heal(alive_balls)
+                    b.aim_shield(alive_balls)
+                    b.try_fire_bullet(target, bullets)
+                    b.try_fire_arrow(target, arrows)
+                    b.try_cast_orb(target, orbs)
+                    b.try_fire_ice_bolt(target, ice_bolts)
+                    b.try_place_wall(target, walls, alive_balls)
+
+                # summoner spawns
+                for b in alive_balls:
+                    if b.role != "summoner" or b.summon_cooldown > 0:
+                        continue
+                    b.minions = [m for m in b.minions if m.alive]
+                    if len(b.minions) >= SUMMONER_MAX_MINIONS:
+                        continue
+                    angle = random.uniform(0, 2 * math.pi)
+                    smx = b.x + math.cos(angle) * (b.radius * 2.5)
+                    smy = b.y + math.sin(angle) * (b.radius * 2.5)
+                    smx = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, smx))
+                    smy = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, smy))
+                    minion = Ball(smx, smy, b.color, b.team_id, "zombie")
+                    minion.hp = SUMMONER_MINION_HP
+                    minion.max_hp = SUMMONER_MINION_HP
+                    minion.radius = max(8, int(BALL_RADIUS * SUMMONER_MINION_RADIUS_SCALE))
+                    minion.is_minion = True
+                    balls.append(minion)
+                    b.minions.append(minion)
+                    b.summon_cooldown = SUMMONER_COOLDOWN
+
+                # spear movement & hits
+                for s in spears:
+                    if s.alive:
+                        s.move()
+                for s in spears:
+                    if not s.alive or s.carried_ball is not None:
+                        continue
+                    for b in alive_balls:
+                        if b.team_id == s.team_id or b.carried_by_spear:
+                            continue
+                        if dist(s.x, s.y, b.x, b.y) <= b.radius + 5:
+                            if b.role == "mirror":
+                                s.dx = -s.dx
+                                s.dy = -s.dy
+                                s.angle = math.atan2(s.dy, s.dx)
+                                s.team_id = b.team_id
+                                s.x += s.dx * 2
+                                s.y += s.dy * 2
+                                break
+                            if b.role == "shield":
+                                sa = math.atan2(s.y - b.y, s.x - b.x)
+                                if b.is_angle_in_shield(sa):
+                                    s.alive = False
+                                    break
+                            b.take_damage(SPEAR_DAMAGE)
+                            if b.trapped_in is not None:
+                                b.trapped_in.captured_ball = None
+                                b.trapped_in.alive = False
+                                b.trapped_in = None
+                            b.carried_by_spear = True
+                            b.pinned_timer = 0
+                            b.vx = 0
+                            b.vy = 0
+                            s.carried_ball = b
+                            break
+
+                # trap trigger & update
+                for t in traps:
+                    if not t.alive:
+                        continue
+                    if t.captured_ball is not None:
+                        t.update()
+                        continue
+                    for b in alive_balls:
+                        if b.team_id == t.team_id or b.trapped_in is not None or b.carried_by_spear or b.pinned_timer > 0:
+                            continue
+                        if dist(t.x, t.y, b.x, b.y) <= t.radius:
+                            t.captured_ball = b
+                            b.trapped_in = t
+                            ta = random.uniform(0, 2 * math.pi)
+                            b.vx = math.cos(ta) * 4.0
+                            b.vy = math.sin(ta) * 4.0
+                            b.bounce_timer = 0
+                            break
+
+                # bullets
+                for bl in bullets:
+                    if bl.alive:
+                        bl.move()
+                for bl in bullets:
+                    if not bl.alive:
+                        continue
+                    for b in alive_balls:
+                        if b.team_id == bl.team_id:
+                            continue
+                        if dist(bl.x, bl.y, b.x, b.y) <= b.radius + 3:
+                            if b.role == "mirror":
+                                bl.dx = -bl.dx
+                                bl.dy = -bl.dy
+                                bl.angle = math.atan2(bl.dy, bl.dx)
+                                bl.team_id = b.team_id
+                                bl.x += bl.dx * 2
+                                bl.y += bl.dy * 2
+                                break
+                            if b.role == "shield":
+                                sa = math.atan2(bl.y - b.y, bl.x - b.x)
+                                if b.is_angle_in_shield(sa, attacker_role="sniper"):
+                                    bl.alive = False
+                                    break
+                            b.take_damage(SNIPER_DAMAGE)
+                            bl.alive = False
+                            ddx = b.x - bl.x
+                            ddy = b.y - bl.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            b.apply_knockback(ddx / dd, ddy / dd, 5.0)
+                            break
+
+                # arrows
+                for ar in arrows:
+                    if ar.alive:
+                        ar.move()
+                for ar in arrows:
+                    if not ar.alive:
+                        continue
+                    for b in alive_balls:
+                        if b.team_id == ar.team_id:
+                            continue
+                        if dist(ar.x, ar.y, b.x, b.y) <= b.radius + 4:
+                            if b.role == "mirror":
+                                ar.dx = -ar.dx
+                                ar.dy = -ar.dy
+                                ar.angle = math.atan2(ar.dy, ar.dx)
+                                ar.team_id = b.team_id
+                                ar.x += ar.dx * 2
+                                ar.y += ar.dy * 2
+                                break
+                            if b.role == "shield":
+                                sa = math.atan2(ar.y - b.y, ar.x - b.x)
+                                if b.is_angle_in_shield(sa):
+                                    ar.alive = False
+                                    break
+                            b.take_damage(ARCHER_DAMAGE)
+                            ar.alive = False
+                            ddx = b.x - ar.x
+                            ddy = b.y - ar.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            b.apply_knockback(ddx / dd, ddy / dd, 3.0)
+                            break
+
+                # orbs
+                for orb in orbs:
+                    if not orb.alive:
+                        continue
+                    orb.move()
+                    if orb.exploding:
+                        continue
+                    for b in alive_balls:
+                        if b.team_id == orb.team_id:
+                            continue
+                        if dist(orb.x, orb.y, b.x, b.y) <= b.radius + 6:
+                            if b.role == "mirror":
+                                orb.dx = -orb.dx
+                                orb.dy = -orb.dy
+                                orb.team_id = b.team_id
+                                orb.x += orb.dx * 2
+                                orb.y += orb.dy * 2
+                                break
+                            if b.role == "shield":
+                                sa = math.atan2(orb.y - b.y, orb.x - b.x)
+                                if b.is_angle_in_shield(sa):
+                                    orb.alive = False
+                                    break
+                            b.take_damage(WIZARD_DAMAGE)
+                            orb.exploding = True
+                            for other in alive_balls:
+                                if other is b or other.team_id == orb.team_id:
+                                    continue
+                                if dist(orb.x, orb.y, other.x, other.y) <= WIZARD_SPLASH_RADIUS:
+                                    other.take_damage(WIZARD_SPLASH_DAMAGE)
+                            break
+
+                # ice bolts
+                for ib in ice_bolts:
+                    if not ib.alive:
+                        continue
+                    ib.move()
+                    for b in alive_balls:
+                        if b.team_id == ib.team_id:
+                            continue
+                        if dist(ib.x, ib.y, b.x, b.y) <= b.radius + 4:
+                            if b.role == "mirror":
+                                ib.dx = -ib.dx
+                                ib.dy = -ib.dy
+                                ib.angle = math.atan2(ib.dy, ib.dx)
+                                ib.team_id = b.team_id
+                                ib.x += ib.dx * 2
+                                ib.y += ib.dy * 2
+                                break
+                            if b.role == "shield":
+                                sa = math.atan2(ib.y - b.y, ib.x - b.x)
+                                if b.is_angle_in_shield(sa):
+                                    ib.alive = False
+                                    break
+                            b.take_damage(ICE_MAGE_DAMAGE)
+                            b.slow_timer = ICE_SLOW_DURATION
+                            ib.alive = False
+                            break
+
+                # bombs
+                for bomb in bombs:
+                    if not bomb.alive:
+                        continue
+                    was_exploding = bomb.exploding
+                    bomb.update()
+                    if bomb.exploding and not was_exploding:
+                        for b in alive_balls:
+                            if b.team_id == bomb.team_id:
+                                continue
+                            d_b = dist(bomb.x, bomb.y, b.x, b.y)
+                            if d_b <= bomb.explosion_radius:
+                                b.take_damage(BOMB_DAMAGE)
+                                dx = b.x - bomb.x
+                                dy = b.y - bomb.y
+                                dd = max(d_b, 0.01)
+                                b.apply_knockback(dx / dd, dy / dd, BOMB_KNOCKBACK)
+
+                # ball-ball collisions
+                for i in range(len(alive_balls)):
+                    for j in range(i + 1, len(alive_balls)):
+                        a, b = alive_balls[i], alive_balls[j]
+                        if a.team_id == b.team_id:
+                            if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                                resolve_collision(a, b)
+                            continue
+                        if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                            if a.role == "zombie" and a.hit_cooldown == 0:
+                                blocked = False
+                                if b.role == "shield":
+                                    sa = math.atan2(a.y - b.y, a.x - b.x)
+                                    blocked = b.is_angle_in_shield(sa)
+                                if not blocked:
+                                    b.take_damage(ZOMBIE_DAMAGE)
+                                a.hit_cooldown = 5
+                            if b.role == "zombie" and b.hit_cooldown == 0:
+                                blocked = False
+                                if a.role == "shield":
+                                    sa = math.atan2(b.y - a.y, b.x - a.x)
+                                    blocked = a.is_angle_in_shield(sa)
+                                if not blocked:
+                                    a.take_damage(ZOMBIE_DAMAGE)
+                                b.hit_cooldown = 5
+                            if a.role == "berserker" and a.hit_cooldown == 0:
+                                dmg = int(BERSERKER_BASE_DAMAGE * a.rage_multiplier)
+                                blocked = False
+                                if b.role == "shield":
+                                    sa = math.atan2(a.y - b.y, a.x - b.x)
+                                    blocked = b.is_angle_in_shield(sa)
+                                if not blocked:
+                                    b.take_damage(dmg)
+                                a.hit_cooldown = 20
+                            if b.role == "berserker" and b.hit_cooldown == 0:
+                                dmg = int(BERSERKER_BASE_DAMAGE * b.rage_multiplier)
+                                blocked = False
+                                if a.role == "shield":
+                                    sa = math.atan2(b.y - a.y, b.x - a.x)
+                                    blocked = a.is_angle_in_shield(sa)
+                                if not blocked:
+                                    a.take_damage(dmg)
+                                b.hit_cooldown = 20
+                            if a.role == "shield" and a.hit_cooldown == 0:
+                                b.take_damage(SHIELD_DAMAGE)
+                                a.hit_cooldown = 10
+                            if b.role == "shield" and b.hit_cooldown == 0:
+                                a.take_damage(SHIELD_DAMAGE)
+                                b.hit_cooldown = 10
+                            if a.role == "ninja" and a.invisible and a.hit_cooldown == 0:
+                                b.take_damage(NINJA_BACKSTAB_DAMAGE)
+                                a.invisible = False
+                                a.invis_timer = 0
+                                a.invis_cooldown = NINJA_INVIS_COOLDOWN
+                                a.hit_cooldown = 30
+                            if b.role == "ninja" and b.invisible and b.hit_cooldown == 0:
+                                a.take_damage(NINJA_BACKSTAB_DAMAGE)
+                                b.invisible = False
+                                b.invis_timer = 0
+                                b.invis_cooldown = NINJA_INVIS_COOLDOWN
+                                b.hit_cooldown = 30
+                            if a.role == "vampire" and a.hit_cooldown == 0:
+                                blocked = False
+                                if b.role == "shield":
+                                    sa = math.atan2(a.y - b.y, a.x - b.x)
+                                    blocked = b.is_angle_in_shield(sa)
+                                if not blocked:
+                                    b.take_damage(VAMPIRE_DAMAGE)
+                                    a.hp = min(a.max_hp, a.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                                a.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                            if b.role == "vampire" and b.hit_cooldown == 0:
+                                blocked = False
+                                if a.role == "shield":
+                                    sa = math.atan2(b.y - a.y, b.x - a.x)
+                                    blocked = a.is_angle_in_shield(sa)
+                                if not blocked:
+                                    a.take_damage(VAMPIRE_DAMAGE)
+                                    b.hp = min(b.max_hp, b.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                                b.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                            if a.role == "tank" and a.hit_cooldown == 0:
+                                blocked = False
+                                if b.role == "shield":
+                                    sa = math.atan2(a.y - b.y, a.x - b.x)
+                                    blocked = b.is_angle_in_shield(sa)
+                                if not blocked:
+                                    b.take_damage(TANK_DAMAGE)
+                                a.hit_cooldown = TANK_HIT_COOLDOWN
+                            if b.role == "tank" and b.hit_cooldown == 0:
+                                blocked = False
+                                if a.role == "shield":
+                                    sa = math.atan2(b.y - a.y, b.x - a.x)
+                                    blocked = a.is_angle_in_shield(sa)
+                                if not blocked:
+                                    a.take_damage(TANK_DAMAGE)
+                                b.hit_cooldown = TANK_HIT_COOLDOWN
+                            if a.role == "assassin" and a.assassin_dashing > 0 and a.hit_cooldown == 0:
+                                blocked = False
+                                if b.role == "shield":
+                                    sa = math.atan2(a.y - b.y, a.x - b.x)
+                                    blocked = b.is_angle_in_shield(sa)
+                                if not blocked:
+                                    b.take_damage(ASSASSIN_DAMAGE)
+                                a.hit_cooldown = 30
+                                a.assassin_dashing = 0
+                                a.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                                ddx = a.x - b.x
+                                ddy = a.y - b.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                a.assassin_retreat_dx = ddx / dd
+                                a.assassin_retreat_dy = ddy / dd
+                                a.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                            if b.role == "assassin" and b.assassin_dashing > 0 and b.hit_cooldown == 0:
+                                blocked = False
+                                if a.role == "shield":
+                                    sa = math.atan2(b.y - a.y, b.x - a.x)
+                                    blocked = a.is_angle_in_shield(sa)
+                                if not blocked:
+                                    a.take_damage(ASSASSIN_DAMAGE)
+                                b.hit_cooldown = 30
+                                b.assassin_dashing = 0
+                                b.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                                ddx = b.x - a.x
+                                ddy = b.y - a.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                b.assassin_retreat_dx = ddx / dd
+                                b.assassin_retreat_dy = ddy / dd
+                                b.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                            if a.role == "mirror" and a.hit_cooldown == 0:
+                                b.take_damage(MIRROR_DAMAGE)
+                                a.hit_cooldown = MIRROR_HIT_COOLDOWN
+                            if b.role == "mirror" and b.hit_cooldown == 0:
+                                a.take_damage(MIRROR_DAMAGE)
+                                b.hit_cooldown = MIRROR_HIT_COOLDOWN
+                            if a.role == "charger" and a.charging > 0 and a.hit_cooldown == 0:
+                                blocked = False
+                                if b.role == "shield":
+                                    sa = math.atan2(a.y - b.y, a.x - b.x)
+                                    blocked = b.is_angle_in_shield(sa)
+                                if not blocked:
+                                    b.take_damage(CHARGER_DAMAGE)
+                                    ddx = b.x - a.x
+                                    ddy = b.y - a.y
+                                    dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                    b.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                                a.hit_cooldown = 30
+                                a.charging = 0
+                                a.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                            if b.role == "charger" and b.charging > 0 and b.hit_cooldown == 0:
+                                blocked = False
+                                if a.role == "shield":
+                                    sa = math.atan2(b.y - a.y, b.x - a.x)
+                                    blocked = a.is_angle_in_shield(sa)
+                                if not blocked:
+                                    a.take_damage(CHARGER_DAMAGE)
+                                    ddx = a.x - b.x
+                                    ddy = a.y - b.y
+                                    dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                    a.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                                b.hit_cooldown = 30
+                                b.charging = 0
+                                b.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                            if a.mimic_original and a.mimic_timer <= 0 and b.team_id != a.team_id:
+                                a.role = b.role
+                                a.speed = ROLE_SPEEDS.get(b.role, 3.0)
+                                a.mimic_display_role = b.role
+                                a.mimic_timer = MIMIC_COPY_DURATION
+                            if b.mimic_original and b.mimic_timer <= 0 and a.team_id != b.team_id:
+                                b.role = a.role
+                                b.speed = ROLE_SPEEDS.get(a.role, 3.0)
+                                b.mimic_display_role = a.role
+                                b.mimic_timer = MIMIC_COPY_DURATION
+                            resolve_collision(a, b)
+
+                # sword hits
+                for b in alive_balls:
+                    if b.role != "swordsman" or b.hit_cooldown > 0:
+                        continue
+                    sbx = b.x + math.cos(b.sword_angle) * b.radius
+                    sby = b.y + math.sin(b.sword_angle) * b.radius
+                    tx, ty = b.sword_tip()
+                    for other in alive_balls:
+                        if other is b or not other.alive or other.team_id == b.team_id:
+                            continue
+                        if point_near_segment(other.x, other.y, sbx, sby, tx, ty, other.radius + 3):
+                            if other.role == "shield":
+                                sa = math.atan2(ty - other.y, tx - other.x)
+                                if other.is_angle_in_shield(sa):
+                                    b.hit_cooldown = 20
+                                    break
+                            other.take_damage(SWORD_DAMAGE)
+                            b.hit_cooldown = 20
+                            ddx = other.x - b.x
+                            ddy = other.y - b.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            other.apply_knockback(ddx / dd, ddy / dd, 10.0)
+                            break
+
+                # chainsaw hits
+                for b in alive_balls:
+                    if b.role != "chainsaw" or b.hit_cooldown > 0:
+                        continue
+                    cbx = b.x + math.cos(b.chainsaw_angle) * b.radius
+                    cby = b.y + math.sin(b.chainsaw_angle) * b.radius
+                    ctx, cty = b.chainsaw_tip()
+                    for other in alive_balls:
+                        if other is b or not other.alive or other.team_id == b.team_id:
+                            continue
+                        if point_near_segment(other.x, other.y, cbx, cby, ctx, cty, other.radius + 3):
+                            if other.role == "shield":
+                                sa = math.atan2(cty - other.y, ctx - other.x)
+                                if other.is_angle_in_shield(sa):
+                                    continue
+                            other.take_damage(CHAINSAW_DAMAGE)
+                            b.hit_cooldown = CHAINSAW_HIT_COOLDOWN
+                            break
+
+                # wall collisions
+                for w in walls:
+                    if not w.alive:
+                        continue
+                    w.update()
+                    if w.exploding:
+                        if w.explode_frames == 9:
+                            blast_angle = math.atan2(w.blast_dy, w.blast_dx)
+                            spread = math.pi / 3
+                            for b in alive_balls:
+                                if b.team_id == w.team_id:
+                                    continue
+                                d_w = dist(w.x, w.y, b.x, b.y)
+                                if d_w > FORT_EXPLODE_RADIUS:
+                                    continue
+                                angle_to = math.atan2(b.y - w.y, b.x - w.x)
+                                diff = (angle_to - blast_angle + math.pi) % (2 * math.pi) - math.pi
+                                if abs(diff) <= spread:
+                                    b.take_damage(FORT_EXPLODE_DAMAGE)
+                                    ddx = b.x - w.x
+                                    ddy = b.y - w.y
+                                    dd = max(d_w, 0.01)
+                                    b.apply_knockback(ddx / dd, ddy / dd, 12.0)
+                        continue
+                    x1, y1, x2, y2 = w.endpoints()
+                    for b in alive_balls:
+                        if b.team_id == w.team_id:
+                            continue
+                        if point_near_segment(b.x, b.y, x1, y1, x2, y2, b.radius + w.thickness // 2):
+                            w.hp -= 1
+                            ddx = b.x - w.x
+                            ddy = b.y - w.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            b.apply_knockback(ddx / dd, ddy / dd, 6.0)
+
+                # necromancer resurrection
+                newly_dead = []
+                for b in balls:
+                    if b.hp <= 0 and b.alive:
+                        b.alive = False
+                        newly_dead.append(b)
+                for necro in alive_balls:
+                    if necro.role != "necromancer" or not necro.alive or necro.necro_cooldown > 0:
+                        continue
+                    for corpse in newly_dead:
+                        if corpse.role == "zombie":
+                            continue
+                        if dist(necro.x, necro.y, corpse.x, corpse.y) <= NECRO_RAISE_RANGE:
+                            corpse.alive = True
+                            corpse.hp = NECRO_ZOMBIE_HP
+                            corpse.max_hp = NECRO_ZOMBIE_HP
+                            corpse.team_id = necro.team_id
+                            corpse.color = necro.color
+                            corpse.role = "zombie"
+                            corpse.speed = ZOMBIE_SPEED
+                            corpse.hit_cooldown = 0
+                            corpse.bounce_timer = 0
+                            corpse.pinned_timer = 0
+                            corpse.carried_by_spear = False
+                            corpse.trapped_in = None
+                            necro.necro_cooldown = NECRO_RAISE_COOLDOWN
+                            break
+
+                # cleanup
+                spears = [s for s in spears if s.alive]
+                traps = [t_obj for t_obj in traps if t_obj.alive]
+                bombs = [bm for bm in bombs if bm.alive]
+                bullets = [bl for bl in bullets if bl.alive]
+                arrows = [ar for ar in arrows if ar.alive]
+                orbs = [orb for orb in orbs if orb.alive]
+                ice_bolts = [ib for ib in ice_bolts if ib.alive]
+                walls = [w for w in walls if w.alive]
+
+                # win check
+                alive_teams = set(b.team_id for b in balls if b.alive)
+                if len(alive_teams) == 1:
+                    winner_team = alive_teams.pop()
+                elif len(alive_teams) == 0:
+                    winner_team = -1
+
+            # ── draw ──
+            screen.fill((20, 20, 30))
+            pygame.draw.rect(screen, (80, 80, 80), (0, 0, WIDTH, HEIGHT), 2)
+            for w in walls:
+                w.draw(screen)
+            for t_obj in traps:
+                t_obj.draw(screen)
+            for bm in bombs:
+                bm.draw(screen)
+            for b in balls:
+                b.draw(screen)
+            for s in spears:
+                s.draw(screen)
+            for bl in bullets:
+                bl.draw(screen)
+            for ar in arrows:
+                ar.draw(screen)
+            for orb in orbs:
+                orb.draw(screen)
+            for ib in ice_bolts:
+                ib.draw(screen)
+
+            # HUD
+            for tid in range(2):
+                color = TEAM_COLORS[tid % len(TEAM_COLORS)]
+                team_balls = [b for b in balls if b.team_id == tid and b.alive]
+                total_hp = sum(b.hp for b in team_balls)
+                alive_count = len(team_balls)
+                roles = set(b.role for b in team_balls)
+                role_str = "/".join(r.capitalize() for r in sorted(roles)) if roles else "Dead"
+                label = "Player" if tid == 0 else "Enemy"
+                text = font.render(f"{label} {role_str}: {total_hp}HP [{alive_count}]", True, color)
+                screen.blit(text, (10, 8 + tid * 20))
+
+            if paused:
+                speed_text = font.render("PAUSED  (Space)", True, (255, 255, 100))
+            else:
+                speed_text = font.render(f"Speed: {speed_options[speed_index]}x  (1/2/3/4)", True, (180, 180, 180))
+            screen.blit(speed_text, (WIDTH - speed_text.get_width() - 10, 8))
+
+            pygame.display.flip()
+            clock.tick(60)
+
+    # ── main interactive loop ──
+    gold = 200
+    wave = 1
+    player_team = [{"role": "zombie", "hp": 100}]
+
+    while True:
+        enemy_roles = get_enemy_wave(wave)
+        action, player_team, gold = shop_screen(player_team, gold, wave, enemy_roles)
+        if action == "quit":
+            return
+
+        survivors, won = run_battle(player_team, enemy_roles)
+
+        if not won or not survivors:
+            # game over screen
+            WIDTH, HEIGHT = 600, 450
+            screen = pygame.display.set_mode((WIDTH, HEIGHT))
+            screen.fill((30, 10, 10))
+            t = big_font.render("Game Over!", True, (255, 80, 80))
+            wv = font.render(f"You reached Wave {wave}", True, (255, 255, 255))
+            hint = small_font.render("Click to return to menu", True, (150, 150, 150))
+            screen.blit(t, (WIDTH // 2 - t.get_width() // 2, HEIGHT // 2 - 60))
+            screen.blit(wv, (WIDTH // 2 - wv.get_width() // 2, HEIGHT // 2))
+            screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT // 2 + 40))
+            pygame.display.flip()
+            waiting = True
+            while waiting:
+                for ev in pygame.event.get():
+                    if ev.type == pygame.QUIT:
+                        pygame.quit()
+                        sys.exit()
+                    if ev.type == pygame.MOUSEBUTTONDOWN or ev.type == pygame.KEYDOWN:
+                        waiting = False
+                clock.tick(60)
+            return
+
+        # survivors get 15 HP regen (capped at max)
+        for info in survivors:
+            max_hp = TANK_HP if info["role"] == "tank" else 100
+            info["hp"] = min(max_hp, info["hp"] + 15)
+        player_team = survivors
+        gold += 50 + wave * 10
+        wave += 1
+
+
 def main():
     global WIDTH, HEIGHT, screen
     saved_teams = None
@@ -4700,4 +5655,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()ss
+    main()
