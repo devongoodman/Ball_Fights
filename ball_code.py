@@ -4767,6 +4767,414 @@ def interactive_mode():
             base.append(random.choice(all_hard))
         return base
 
+    # ── direction system ──
+    DIRECTIONS = ["N", "S", "E", "W", "NE", "NW", "SE", "SW"]
+
+    def get_num_directions(wave):
+        if wave <= 5:
+            return 1
+        elif wave <= 12:
+            return random.randint(1, 2)
+        elif wave <= 20:
+            return random.randint(2, 3)
+        else:
+            return random.randint(2, 4)
+
+    def pick_directions(wave):
+        n = get_num_directions(wave)
+        return random.sample(DIRECTIONS, min(n, len(DIRECTIONS)))
+
+    def direction_spawn_pos(direction, aw, ah, margin):
+        """Return (x, y) on the edge of the arena for a given direction."""
+        if direction == "N":
+            return random.randint(margin, aw - margin), margin
+        elif direction == "S":
+            return random.randint(margin, aw - margin), ah - margin
+        elif direction == "E":
+            return aw - margin, random.randint(margin, ah - margin)
+        elif direction == "W":
+            return margin, random.randint(margin, ah - margin)
+        elif direction == "NE":
+            return aw - margin, margin
+        elif direction == "NW":
+            return margin, margin
+        elif direction == "SE":
+            return aw - margin, ah - margin
+        elif direction == "SW":
+            return margin, ah - margin
+        return aw // 2, margin
+
+    def direction_arrow_pos(direction, aw, ah):
+        """Return (tip_x, tip_y, angle) for drawing an arrow indicator."""
+        m = 40
+        if direction == "N":
+            return aw // 2, m, math.pi / 2
+        elif direction == "S":
+            return aw // 2, ah - m, -math.pi / 2
+        elif direction == "E":
+            return aw - m, ah // 2, math.pi
+        elif direction == "W":
+            return m, ah // 2, 0
+        elif direction == "NE":
+            return aw - m, m, math.pi * 3 / 4
+        elif direction == "NW":
+            return m, m, math.pi / 4
+        elif direction == "SE":
+            return aw - m, ah - m, -math.pi * 3 / 4
+        elif direction == "SW":
+            return m, ah - m, -math.pi / 4
+        return aw // 2, m, math.pi / 2
+
+    def draw_direction_arrow(surface, direction, aw, ah, pulse_val):
+        """Draw a pulsing red arrow showing where enemies will come from."""
+        tx, ty, angle = direction_arrow_pos(direction, aw, ah)
+        sz = 20 + int(5 * math.sin(pulse_val))
+        # arrowhead
+        p1 = (int(tx + math.cos(angle) * sz), int(ty + math.sin(angle) * sz))
+        p2 = (int(tx + math.cos(angle + 2.5) * sz * 0.6), int(ty + math.sin(angle + 2.5) * sz * 0.6))
+        p3 = (int(tx + math.cos(angle - 2.5) * sz * 0.6), int(ty + math.sin(angle - 2.5) * sz * 0.6))
+        r = min(255, 180 + int(60 * math.sin(pulse_val)))
+        pygame.draw.polygon(surface, (r, 50, 50), [p1, p2, p3])
+        # label
+        label = small_font.render(direction, True, (255, 100, 100))
+        surface.blit(label, (tx - label.get_width() // 2, ty - 28))
+
+    # ── role select screen ──
+    def role_select_screen():
+        global WIDTH, HEIGHT, screen
+        WIDTH, HEIGHT = 900, 600
+        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        selected = None
+
+        ROLE_DESCS = {
+            "zombie": "Cheap melee. Slow but sturdy.",
+            "swordsman": "Spinning blade. Good melee DPS.",
+            "spearman": "Throws spears that pin enemies.",
+            "trapper": "Places traps that cage enemies.",
+            "berserker": "Gets faster as HP drops.",
+            "chainsaw": "Continuous contact damage.",
+            "charger": "Charges at enemies for big hits.",
+            "bomber": "Drops timed explosive bombs.",
+            "vampire": "Lifesteal on melee hits.",
+            "archer": "Fast arrows at medium range.",
+            "fortifier": "Places defensive walls.",
+            "ice_mage": "Slows enemies with ice bolts.",
+            "ninja": "Goes invisible, backstabs.",
+            "assassin": "Dash strike, then retreat.",
+            "shield": "Blocks attacks for allies.",
+            "wizard": "AoE magic orb explosions.",
+            "summoner": "Summons zombie minions.",
+            "sniper": "Long range, high damage shots.",
+            "mimic": "Copies enemy roles on contact.",
+            "mirror": "Reflects projectiles back.",
+            "healer": "Heals nearby allies over time.",
+            "necromancer": "Raises dead enemies as zombies.",
+            "tank": "High HP, armored, slow.",
+        }
+
+        while True:
+            mx, my = pygame.mouse.get_pos()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    # check role clicks
+                    cols = 6
+                    for idx, role in enumerate(SHOP_ROLES):
+                        col = idx % cols
+                        row = idx // cols
+                        cx = 100 + col * 120
+                        cy = 140 + row * 90
+                        if (mx - cx) ** 2 + (my - cy) ** 2 <= 24 ** 2:
+                            selected = role
+                    # confirm button
+                    if selected is not None:
+                        confirm_rect = pygame.Rect(WIDTH // 2 - 80, HEIGHT - 60, 160, 44)
+                        if confirm_rect.collidepoint(mx, my):
+                            return selected
+
+            screen.fill((20, 20, 35))
+            t = title_font.render("Choose Your Role", True, (255, 255, 255))
+            screen.blit(t, (WIDTH // 2 - t.get_width() // 2, 20))
+            sub = font.render("You are the commander. Pick your class.", True, (180, 180, 200))
+            screen.blit(sub, (WIDTH // 2 - sub.get_width() // 2, 65))
+
+            cols = 6
+            for idx, role in enumerate(SHOP_ROLES):
+                col = idx % cols
+                row = idx // cols
+                cx = 100 + col * 120
+                cy = 140 + row * 90
+                c = TEAM_COLORS[0]
+                if selected == role:
+                    pygame.draw.circle(screen, (255, 255, 100), (cx, cy), 28, 3)
+                pygame.draw.circle(screen, c, (cx, cy), 22)
+                nl = small_font.render(role.capitalize(), True, (220, 220, 255))
+                screen.blit(nl, (cx - nl.get_width() // 2, cy + 26))
+                # no price shown on role select - it doesn't matter here
+
+            # description of selected
+            if selected:
+                desc = ROLE_DESCS.get(selected, "")
+                dl = font.render(f"{selected.capitalize()}: {desc}", True, (200, 255, 200))
+                screen.blit(dl, (WIDTH // 2 - dl.get_width() // 2, HEIGHT - 115))
+                confirm_rect = pygame.Rect(WIDTH // 2 - 80, HEIGHT - 60, 160, 44)
+                cc = (60, 180, 60) if confirm_rect.collidepoint(mx, my) else (50, 150, 50)
+                pygame.draw.rect(screen, cc, confirm_rect, border_radius=8)
+                cl = font.render("CONFIRM", True, (255, 255, 255))
+                screen.blit(cl, (confirm_rect.centerx - cl.get_width() // 2, confirm_rect.centery - cl.get_height() // 2))
+
+            pygame.display.flip()
+            clock.tick(60)
+
+    # ── setup / placement phase ──
+    def setup_phase(player_team, enemy_roles, directions, wave):
+        global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
+
+        total = len(player_team) + len(enemy_roles)
+        aw, ah = get_arena_size(max(total, 10))
+        aw = max(aw, 800)
+        ah = max(ah, 600)
+        PANEL_W = 180
+        full_w = aw + PANEL_W
+        WIDTH, HEIGHT = full_w, ah
+        if total > 6:
+            BALL_RADIUS = max(12, BASE_BALL_RADIUS - (total - 6) * 2)
+        else:
+            BALL_RADIUS = BASE_BALL_RADIUS
+        SWORD_LENGTH = BALL_RADIUS * 2
+        TRAP_RADIUS = BALL_RADIUS * 4
+        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+        # create ball objects for player team, placed in left third
+        color = TEAM_COLORS[0]
+        placed_balls = []
+        for i, info in enumerate(player_team):
+            bx = aw // 4 + (i % 4) * (BALL_RADIUS * 3)
+            by = ah // 3 + (i // 4) * (BALL_RADIUS * 3)
+            bx = max(BALL_RADIUS + 5, min(aw - BALL_RADIUS - 5, bx))
+            by = max(BALL_RADIUS + 5, min(ah - BALL_RADIUS - 5, by))
+            b = Ball(bx, by, color, 0, info["role"])
+            b.hp = info["hp"]
+            b.max_hp = TANK_HP if info["role"] == "tank" else 100
+            placed_balls.append(b)
+
+        # pre-placed objects from abilities
+        setup_walls = []
+        setup_traps = []
+        setup_bombs = []
+
+        # ability limits per unit
+        wall_limits = {}  # ball index -> walls remaining
+        trap_limits = {}
+        bomb_limits = {}
+        for i, b in enumerate(placed_balls):
+            if b.role == "fortifier":
+                wall_limits[i] = 5
+            elif b.role == "trapper":
+                trap_limits[i] = 3
+            elif b.role == "bomber":
+                bomb_limits[i] = 3
+
+        dragging = None  # index of ball being dragged
+        selected_ability = None  # (ball_index, ability_type)
+        pulse = 0.0
+
+        # instructions
+        SETUP_INSTRUCTIONS = [
+            "Left-click & drag units to position them.",
+            "Right-click a fortifier/trapper/bomber to select ability,",
+            "then left-click arena to place wall/trap/bomb.",
+            "Press ENTER or click START when ready.",
+        ]
+
+        start_rect = pygame.Rect(aw + 10, ah - 55, PANEL_W - 20, 40)
+
+        while True:
+            mx, my = pygame.mouse.get_pos()
+            pulse += 0.05
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN:
+                        # start battle
+                        result_team = []
+                        for b in placed_balls:
+                            result_team.append({"role": b.role, "hp": b.hp, "x": b.x, "y": b.y})
+                        return result_team, setup_walls, setup_traps, setup_bombs, aw, ah
+                    if event.key == pygame.K_ESCAPE:
+                        selected_ability = None
+
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                    # right click: select ability from a unit
+                    selected_ability = None
+                    for i, b in enumerate(placed_balls):
+                        if dist(mx, my, b.x, b.y) <= b.radius + 4:
+                            if i in wall_limits and wall_limits[i] > 0:
+                                selected_ability = (i, "wall")
+                            elif i in trap_limits and trap_limits[i] > 0:
+                                selected_ability = (i, "trap")
+                            elif i in bomb_limits and bomb_limits[i] > 0:
+                                selected_ability = (i, "bomb")
+                            break
+
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if mx >= aw:
+                        # panel area - check start button
+                        if start_rect.collidepoint(mx, my):
+                            result_team = []
+                            for b in placed_balls:
+                                result_team.append({"role": b.role, "hp": b.hp, "x": b.x, "y": b.y})
+                            return result_team, setup_walls, setup_traps, setup_bombs, aw, ah
+                    elif selected_ability is not None:
+                        # place ability
+                        si, atype = selected_ability
+                        if atype == "wall" and wall_limits.get(si, 0) > 0:
+                            angle = random.uniform(0, math.pi)
+                            w = FortWall(mx, my, angle, 0, color, explosive=False)
+                            setup_walls.append(w)
+                            wall_limits[si] -= 1
+                            if wall_limits[si] <= 0:
+                                selected_ability = None
+                        elif atype == "trap" and trap_limits.get(si, 0) > 0:
+                            t = Trap(mx, my, 0, color)
+                            setup_traps.append(t)
+                            trap_limits[si] -= 1
+                            if trap_limits[si] <= 0:
+                                selected_ability = None
+                        elif atype == "bomb" and bomb_limits.get(si, 0) > 0:
+                            bm = Bomb(mx, my, 0, color)
+                            setup_bombs.append(bm)
+                            bomb_limits[si] -= 1
+                            if bomb_limits[si] <= 0:
+                                selected_ability = None
+                    else:
+                        # try to grab a ball to drag
+                        for i, b in enumerate(placed_balls):
+                            if dist(mx, my, b.x, b.y) <= b.radius + 4:
+                                dragging = i
+                                break
+
+                if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    if dragging is not None:
+                        # clamp to arena
+                        b = placed_balls[dragging]
+                        b.x = max(BALL_RADIUS + 2, min(aw - BALL_RADIUS - 2, b.x))
+                        b.y = max(BALL_RADIUS + 2, min(ah - BALL_RADIUS - 2, b.y))
+                    dragging = None
+
+            # drag update
+            if dragging is not None and mx < aw:
+                placed_balls[dragging].x = mx
+                placed_balls[dragging].y = my
+
+            # ── draw ──
+            screen.fill((20, 20, 30))
+            # arena border
+            pygame.draw.rect(screen, (80, 80, 80), (0, 0, aw, ah), 2)
+
+            # direction arrows
+            for d in directions:
+                draw_direction_arrow(screen, d, aw, ah, pulse)
+
+            # draw pre-placed objects
+            for w in setup_walls:
+                w.draw(screen)
+            for t in setup_traps:
+                t.draw(screen)
+            for bm in setup_bombs:
+                bm.draw(screen)
+
+            # draw placed balls
+            for i, b in enumerate(placed_balls):
+                b.draw(screen)
+                # commander indicator (first ball = player's commander)
+                if i == 0:
+                    pygame.draw.circle(screen, (255, 255, 100), (int(b.x), int(b.y)), b.radius + 5, 2)
+                    crown = small_font.render("CMD", True, (255, 255, 100))
+                    screen.blit(crown, (int(b.x) - crown.get_width() // 2, int(b.y) - b.radius - 18))
+
+            # ability cursor
+            if selected_ability is not None and mx < aw:
+                si, atype = selected_ability
+                if atype == "wall":
+                    pygame.draw.line(screen, (200, 200, 255), (mx - 30, my), (mx + 30, my), 4)
+                elif atype == "trap":
+                    pygame.draw.circle(screen, (200, 150, 50), (mx, my), TRAP_RADIUS, 2)
+                elif atype == "bomb":
+                    pygame.draw.circle(screen, (255, 100, 50), (mx, my), 8)
+
+            # ── side panel ──
+            panel_x = aw
+            pygame.draw.rect(screen, (30, 30, 45), (panel_x, 0, PANEL_W, ah))
+            pygame.draw.line(screen, (80, 80, 80), (panel_x, 0), (panel_x, ah), 2)
+
+            # wave info
+            wl = font.render(f"Wave {wave}", True, (255, 255, 255))
+            screen.blit(wl, (panel_x + PANEL_W // 2 - wl.get_width() // 2, 10))
+
+            # directions label
+            dir_label = small_font.render(f"From: {', '.join(directions)}", True, (255, 100, 100))
+            screen.blit(dir_label, (panel_x + 10, 38))
+
+            # enemy preview
+            el = font.render("Enemies:", True, (255, 120, 120))
+            screen.blit(el, (panel_x + 10, 60))
+            for i, role in enumerate(enemy_roles):
+                if i > 12:
+                    more = small_font.render(f"+{len(enemy_roles) - 12} more", True, (200, 150, 150))
+                    screen.blit(more, (panel_x + 10, 85 + i * 22))
+                    break
+                rl = small_font.render(f"- {role.capitalize()}", True, (255, 180, 180))
+                screen.blit(rl, (panel_x + 10, 85 + i * 22))
+
+            # ability info
+            ay = ah // 2 + 20
+            al = font.render("Abilities:", True, (180, 220, 255))
+            screen.blit(al, (panel_x + 10, ay))
+            ability_y = ay + 25
+            for i, b in enumerate(placed_balls):
+                if i in wall_limits:
+                    wt = small_font.render(f"Fortifier: {wall_limits[i]} walls", True, (200, 200, 255))
+                    screen.blit(wt, (panel_x + 10, ability_y))
+                    ability_y += 18
+                if i in trap_limits:
+                    tt = small_font.render(f"Trapper: {trap_limits[i]} traps", True, (200, 180, 100))
+                    screen.blit(tt, (panel_x + 10, ability_y))
+                    ability_y += 18
+                if i in bomb_limits:
+                    bt = small_font.render(f"Bomber: {bomb_limits[i]} bombs", True, (255, 150, 100))
+                    screen.blit(bt, (panel_x + 10, ability_y))
+                    ability_y += 18
+
+            if selected_ability is not None:
+                si, atype = selected_ability
+                hint = small_font.render(f"Placing {atype}...", True, (150, 255, 150))
+                screen.blit(hint, (panel_x + 10, ability_y + 5))
+                hint2 = small_font.render("L-click arena / ESC", True, (140, 140, 140))
+                screen.blit(hint2, (panel_x + 10, ability_y + 22))
+
+            # instructions
+            iy = ah - 140
+            for line in SETUP_INSTRUCTIONS:
+                il = small_font.render(line, True, (130, 130, 150))
+                screen.blit(il, (panel_x + 10, iy))
+                iy += 16
+
+            # start button
+            sc = (60, 180, 60) if start_rect.collidepoint(mx, my) else (50, 150, 50)
+            pygame.draw.rect(screen, sc, start_rect, border_radius=8)
+            sl = font.render("START!", True, (255, 255, 255))
+            screen.blit(sl, (start_rect.centerx - sl.get_width() // 2, start_rect.centery - sl.get_height() // 2))
+
+            pygame.display.flip()
+            clock.tick(60)
+
     # ── shop screen ──
     def shop_screen(player_team, gold, wave, next_enemies):
         global WIDTH, HEIGHT, screen
@@ -4836,8 +5244,8 @@ def interactive_mode():
                                 message = f"Healed {info['role'].capitalize()}!"
                                 message_timer = 120
 
-                    # sell button (scrolled)
-                    if selected_ball is not None and 0 <= selected_ball < len(player_team):
+                    # sell button (scrolled) - can't sell commander (index 0)
+                    if selected_ball is not None and selected_ball > 0 and selected_ball < len(player_team):
                         sell_rect = pygame.Rect(140, 120 + selected_ball * 48 + 16 - view_scroll, 50, 28)
                         if sell_rect.collidepoint(mx, my):
                             info = player_team[selected_ball]
@@ -4847,6 +5255,11 @@ def interactive_mode():
                             player_team.pop(selected_ball)
                             selected_ball = None
                             message = f"Sold {sold_name}! (+{sell_price}g)"
+                            message_timer = 120
+                    elif selected_ball == 0:
+                        sell_rect = pygame.Rect(140, 120 + selected_ball * 48 + 16 - view_scroll, 50, 28)
+                        if sell_rect.collidepoint(mx, my):
+                            message = "Can't sell your commander!"
                             message_timer = 120
 
                     # buy role (fixed near bottom)
@@ -4903,7 +5316,8 @@ def interactive_mode():
                 pygame.draw.circle(screen, c, (bx, by), 14)
                 if selected_ball == i:
                     pygame.draw.circle(screen, (255, 255, 100), (bx, by), 17, 2)
-                rl = small_font.render(role.capitalize(), True, (220, 220, 255))
+                role_label = role.capitalize() + (" [CMD]" if i == 0 else "")
+                rl = small_font.render(role_label, True, (255, 255, 100) if i == 0 else (220, 220, 255))
                 screen.blit(rl, (bx + 20, by - 14))
                 bar_w = 70
                 bar_x = bx + 20
@@ -4927,15 +5341,19 @@ def interactive_mode():
                     screen.blit(hl, (heal_rect.centerx - hl.get_width() // 2, heal_rect.centery - hl.get_height() // 2))
                     price_l = small_font.render(f"{HEAL_POTION_COST}g", True, (255, 215, 80))
                     screen.blit(price_l, (heal_rect.right + 4, heal_rect.centery - price_l.get_height() // 2))
-                    # sell
-                    sell_rect = pygame.Rect(140, sel_y + 16, 50, 28)
-                    sc = (180, 60, 60) if sell_rect.collidepoint(mx, my) else (140, 50, 50)
-                    pygame.draw.rect(screen, sc, sell_rect, border_radius=4)
-                    sl = small_font.render("Sell", True, (255, 255, 255))
-                    screen.blit(sl, (sell_rect.centerx - sl.get_width() // 2, sell_rect.centery - sl.get_height() // 2))
-                    sell_price = ROLE_PRICES.get(player_team[selected_ball]["role"], 30) // 2
-                    sp_l = small_font.render(f"+{sell_price}g", True, (255, 215, 80))
-                    screen.blit(sp_l, (sell_rect.right + 4, sell_rect.centery - sp_l.get_height() // 2))
+                    # sell (not for commander)
+                    if selected_ball > 0:
+                        sell_rect = pygame.Rect(140, sel_y + 16, 50, 28)
+                        sc = (180, 60, 60) if sell_rect.collidepoint(mx, my) else (140, 50, 50)
+                        pygame.draw.rect(screen, sc, sell_rect, border_radius=4)
+                        sl = small_font.render("Sell", True, (255, 255, 255))
+                        screen.blit(sl, (sell_rect.centerx - sl.get_width() // 2, sell_rect.centery - sl.get_height() // 2))
+                        sell_price = ROLE_PRICES.get(player_team[selected_ball]["role"], 30) // 2
+                        sp_l = small_font.render(f"+{sell_price}g", True, (255, 215, 80))
+                        screen.blit(sp_l, (sell_rect.right + 4, sell_rect.centery - sp_l.get_height() // 2))
+                    else:
+                        cmd_l = small_font.render("Commander", True, (255, 255, 100))
+                        screen.blit(cmd_l, (140, sel_y + 20))
 
             # right panel: enemy preview (scrollable)
             epanel_x = WIDTH - 195
@@ -5007,11 +5425,16 @@ def interactive_mode():
             clock.tick(60)
 
     # ── battle ──
-    def run_battle(player_team, enemy_roles):
+    def run_battle(player_team, enemy_roles, directions, pre_walls=None, pre_traps=None, pre_bombs=None, arena_size=None):
         global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
 
         total = len(player_team) + len(enemy_roles)
-        aw, ah = get_arena_size(total)
+        if arena_size:
+            aw, ah = arena_size
+        else:
+            aw, ah = get_arena_size(max(total, 10))
+            aw = max(aw, 800)
+            ah = max(ah, 600)
         WIDTH, HEIGHT = aw, ah
         if total > 6:
             BALL_RADIUS = max(12, BASE_BALL_RADIUS - (total - 6) * 2)
@@ -5021,21 +5444,39 @@ def interactive_mode():
         TRAP_RADIUS = BALL_RADIUS * 4
         screen = pygame.display.set_mode((WIDTH, HEIGHT))
 
-        # spawn player balls with HP overrides
-        configs = []
-        for info in player_team:
-            configs.append({"team_id": 0, "role": info["role"]})
-        for role in enemy_roles:
-            configs.append({"team_id": 1, "role": role})
-        balls = spawn_balls(configs)
-        # apply saved HP to player balls
-        pi = 0
-        for b in balls:
-            if b.team_id == 0 and pi < len(player_team):
-                b.hp = player_team[pi]["hp"]
-                pi += 1
+        # spawn player balls at pre-placed positions (from setup phase)
+        color_p = TEAM_COLORS[0]
+        balls = []
+        commander = None
+        for i, info in enumerate(player_team):
+            bx = info.get("x", random.randint(BALL_RADIUS + 10, aw // 3))
+            by = info.get("y", random.randint(BALL_RADIUS + 10, ah - BALL_RADIUS - 10))
+            b = Ball(bx, by, color_p, 0, info["role"])
+            b.hp = info["hp"]
+            b.max_hp = TANK_HP if info["role"] == "tank" else 100
+            if i == 0:
+                commander = b
+            balls.append(b)
 
-        spears, traps, bombs, bullets, arrows, orbs, ice_bolts, walls = [], [], [], [], [], [], [], []
+        # spawn enemies from directions (streaming from edges)
+        color_e = TEAM_COLORS[1]
+        margin = BALL_RADIUS + 10
+        for idx, role in enumerate(enemy_roles):
+            d = directions[idx % len(directions)]
+            ex, ey = direction_spawn_pos(d, aw, ah, margin)
+            # add some spread so they don't stack
+            ex += random.randint(-40, 40)
+            ey += random.randint(-40, 40)
+            ex = max(margin, min(aw - margin, ex))
+            ey = max(margin, min(ah - margin, ey))
+            b = Ball(ex, ey, color_e, 1, role)
+            balls.append(b)
+
+        # load pre-placed objects from setup phase
+        walls = list(pre_walls) if pre_walls else []
+        traps = list(pre_traps) if pre_traps else []
+        bombs = list(pre_bombs) if pre_bombs else []
+        spears, bullets, arrows, orbs, ice_bolts = [], [], [], [], []
         speed_options = [1, 2, 4, 10]
         speed_index = 0
         paused = False
@@ -5618,12 +6059,17 @@ def interactive_mode():
                 ice_bolts = [ib for ib in ice_bolts if ib.alive]
                 walls = [w for w in walls if w.alive]
 
+                # commander death = instant loss
+                if commander is not None and not commander.alive:
+                    winner_team = 1
+
                 # win check
-                alive_teams = set(b.team_id for b in balls if b.alive)
-                if len(alive_teams) == 1:
-                    winner_team = alive_teams.pop()
-                elif len(alive_teams) == 0:
-                    winner_team = -1
+                if winner_team is None:
+                    alive_teams = set(b.team_id for b in balls if b.alive)
+                    if len(alive_teams) == 1:
+                        winner_team = alive_teams.pop()
+                    elif len(alive_teams) == 0:
+                        winner_team = -1
 
             # ── draw ──
             screen.fill((20, 20, 30))
@@ -5636,6 +6082,11 @@ def interactive_mode():
                 bm.draw(screen)
             for b in balls:
                 b.draw(screen)
+            # commander highlight
+            if commander is not None and commander.alive:
+                pygame.draw.circle(screen, (255, 255, 100), (int(commander.x), int(commander.y)), commander.radius + 5, 2)
+                cmd_label = small_font.render("CMD", True, (255, 255, 100))
+                screen.blit(cmd_label, (int(commander.x) - cmd_label.get_width() // 2, int(commander.y) - commander.radius - 16))
             for s in spears:
                 s.draw(screen)
             for bl in bullets:
@@ -5723,12 +6174,18 @@ def interactive_mode():
             clock.tick(60)
 
     # ── main interactive loop ──
+    # step 1: pick commander role
+    commander_role = role_select_screen()
+
     gold = 200
     wave = 1
-    player_team = [{"role": "zombie", "hp": 100}]
+    cmd_hp = TANK_HP if commander_role == "tank" else 100
+    player_team = [{"role": commander_role, "hp": cmd_hp}]
 
     while True:
         enemy_roles = get_enemy_wave(wave)
+        directions = pick_directions(wave)
+
         action, player_team, gold = shop_screen(player_team, gold, wave, enemy_roles)
         if action == "quit":
             return
@@ -5744,7 +6201,15 @@ def interactive_mode():
                 surrendered = True
 
         if not surrendered:
-            survivors, won, earned = run_battle(player_team, enemy_roles)
+            # setup phase: place units, use abilities, see enemy directions
+            placed_team, setup_w, setup_t, setup_b, aw, ah = setup_phase(
+                player_team, enemy_roles, directions, wave)
+
+            # battle with pre-placed units and enemy spawning from edges
+            survivors, won, earned = run_battle(
+                placed_team, enemy_roles, directions,
+                pre_walls=setup_w, pre_traps=setup_t, pre_bombs=setup_b,
+                arena_size=(aw, ah))
             gold += earned
 
             if not won or not survivors:
