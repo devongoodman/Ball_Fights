@@ -1099,6 +1099,16 @@ class Ball:
         self.trap_bounces = 0       # remaining damaging bounces
         self.carried_by_spear = False  # being dragged by a spear
         self.trapped_in = None          # reference to trap cage
+        # boss fields
+        self.is_boss = False
+        self.boss_abilities = set()     # extra abilities beyond base role
+        self.boss_summon_count = 0      # how many copies to summon per kill
+        self.boss_self_heal = False     # heals itself instead of others
+        self.boss_cooldown_overrides = {}  # e.g. {"sniper_cooldown": 90}
+
+    def has_ability(self, role_name):
+        """Check if this ball has a given role's ability (base role or boss extra)."""
+        return self.role == role_name or role_name in self.boss_abilities
 
     @property
     def rage_multiplier(self):
@@ -1895,8 +1905,8 @@ class Ball:
             self.wall_cooldown -= 1
 
     def take_damage(self, amount):
-        """Apply damage with armor reduction for tank."""
-        if self.role == "tank":
+        """Apply damage with armor reduction for tank or boss with tank ability."""
+        if self.has_ability("tank"):
             amount = max(1, int(amount * TANK_ARMOR))
         self.hp -= amount
 
@@ -1920,7 +1930,7 @@ class Ball:
                 self.y + math.sin(self.chainsaw_angle) * (self.radius + CHAINSAW_LENGTH))
 
     def try_place_wall(self, target, walls, all_balls):
-        if self.role != "fortifier" or self.wall_cooldown > 0 or target is None:
+        if not self.has_ability("fortifier") or self.wall_cooldown > 0 or target is None:
             return
         allies_hurt = [a for a in all_balls if a is not self and a.alive
                        and a.team_id == self.team_id and a.hp < 100
@@ -1954,7 +1964,7 @@ class Ball:
         self.wall_cooldown = FORT_WALL_COOLDOWN
 
     def try_throw_spear(self, target, spears):
-        if self.role != "spearman" or self.spear_cooldown > 0 or target is None:
+        if not self.has_ability("spearman") or self.spear_cooldown > 0 or target is None:
             return
         dx = target.x - self.x
         dy = target.y - self.y
@@ -1964,7 +1974,7 @@ class Ball:
         self.spear_cooldown = SPEAR_COOLDOWN
 
     def try_place_trap(self, target, traps):
-        if self.role != "trapper" or self.trap_cooldown > 0 or target is None:
+        if not self.has_ability("trapper") or self.trap_cooldown > 0 or target is None:
             return
         # place trap between self and target with imperfect aim
         dx = target.x - self.x
@@ -2011,32 +2021,38 @@ class Ball:
         return False
 
     def try_heal(self, all_balls):
-        if self.role != "healer" or self.heal_cooldown > 0:
+        if not self.has_ability("healer") or self.heal_cooldown > 0:
             return
         healed = False
-        # heal nearby allies
-        for ally in all_balls:
-            if ally is self or ally.team_id != self.team_id or not ally.alive:
-                continue
-            if dist(self.x, self.y, ally.x, ally.y) <= HEAL_RANGE:
-                if ally.hp < ally.max_hp:
-                    ally.hp = min(ally.max_hp, ally.hp + HEAL_AMOUNT)
-                    healed = True
+        if self.boss_self_heal:
+            # boss heals itself
+            if self.hp < self.max_hp:
+                self.hp = min(self.max_hp, self.hp + HEAL_AMOUNT * 2)
+                healed = True
+        else:
+            # heal nearby allies
+            for ally in all_balls:
+                if ally is self or ally.team_id != self.team_id or not ally.alive:
+                    continue
+                if dist(self.x, self.y, ally.x, ally.y) <= HEAL_RANGE:
+                    if ally.hp < ally.max_hp:
+                        ally.hp = min(ally.max_hp, ally.hp + HEAL_AMOUNT)
+                        healed = True
         if healed:
             self.heal_cooldown = HEAL_COOLDOWN
 
     def try_fire_bullet(self, target, bullets):
-        if self.role != "sniper" or self.sniper_cooldown > 0 or target is None:
+        if not self.has_ability("sniper") or self.sniper_cooldown > 0 or target is None:
             return
         dx = target.x - self.x
         dy = target.y - self.y
         d = max(math.sqrt(dx * dx + dy * dy), 0.01)
         bullets.append(Bullet(self.x, self.y, dx / d * SNIPER_BULLET_SPEED,
                               dy / d * SNIPER_BULLET_SPEED, self.team_id, self.color))
-        self.sniper_cooldown = SNIPER_COOLDOWN
+        self.sniper_cooldown = self.boss_cooldown_overrides.get("sniper_cooldown", SNIPER_COOLDOWN)
 
     def try_fire_arrow(self, target, arrows):
-        if self.role != "archer" or self.archer_cooldown > 0 or target is None:
+        if not self.has_ability("archer") or self.archer_cooldown > 0 or target is None:
             return
         dx = target.x - self.x
         dy = target.y - self.y
@@ -2046,7 +2062,7 @@ class Ball:
         self.archer_cooldown = ARCHER_COOLDOWN
 
     def try_cast_orb(self, target, orbs):
-        if self.role != "wizard" or self.wizard_cooldown > 0 or target is None:
+        if not self.has_ability("wizard") or self.wizard_cooldown > 0 or target is None:
             return
         dx = target.x - self.x
         dy = target.y - self.y
@@ -2056,7 +2072,7 @@ class Ball:
         self.wizard_cooldown = WIZARD_COOLDOWN
 
     def try_fire_ice_bolt(self, target, ice_bolts):
-        if self.role != "ice_mage" or self.ice_cooldown > 0 or target is None:
+        if not self.has_ability("ice_mage") or self.ice_cooldown > 0 or target is None:
             return
         dx = target.x - self.x
         dy = target.y - self.y
@@ -2066,7 +2082,7 @@ class Ball:
         self.ice_cooldown = ICE_MAGE_COOLDOWN
 
     def try_drop_bomb(self, target, bombs):
-        if self.role != "bomber" or self.bomb_cooldown > 0 or target is None:
+        if not self.has_ability("bomber") or self.bomb_cooldown > 0 or target is None:
             return
         # drop bomb slightly towards the target
         dx = target.x - self.x
@@ -4100,6 +4116,10 @@ def run_tournament(bracket, arena_idx, realistic=False):
                                     s.alive = False
                                     break
                             b.take_damage(SPEAR_DAMAGE)
+                            # bosses can't be pinned/carried by spears
+                            if b.is_boss:
+                                s.alive = False
+                                break
                             if b.trapped_in is not None:
                                 b.trapped_in.captured_ball = None
                                 b.trapped_in.alive = False
@@ -4726,46 +4746,115 @@ def interactive_mode():
             return 960, 720
 
     # structured waves — each wave has a fixed roster, gets harder each level
+    # boss waves: 10, 20, 25, 50, 100
+    BOSS_WAVES = {10, 20, 25, 50, 100}
+
     WAVE_TABLE = {
         1:  ["zombie"],
         2:  ["zombie", "zombie"],
         3:  ["swordsman", "zombie"],
         4:  ["swordsman", "spearman"],
-        5:  ["zombie", "zombie", "swordsman"],
-        6:  ["trapper", "swordsman", "zombie"],
-        7:  ["berserker", "spearman", "zombie"],
-        8:  ["bomber", "chainsaw", "swordsman"],
-        9:  ["trapper", "berserker", "spearman", "zombie"],
-        10: ["vampire", "swordsman", "zombie", "zombie"],
-        11: ["archer", "chainsaw", "bomber", "zombie"],
-        12: ["fortifier", "ice_mage", "spearman", "swordsman"],
-        13: ["charger", "vampire", "berserker", "trapper"],
-        14: ["archer", "ice_mage", "chainsaw", "swordsman", "zombie"],
-        15: ["ninja", "vampire", "berserker", "spearman", "zombie"],
-        16: ["assassin", "shield", "archer", "swordsman", "zombie"],
-        17: ["wizard", "fortifier", "charger", "chainsaw", "trapper"],
-        18: ["summoner", "ninja", "vampire", "berserker", "spearman"],
-        19: ["sniper", "shield", "assassin", "archer", "ice_mage", "zombie"],
-        20: ["healer", "tank", "wizard", "charger", "berserker", "swordsman"],
-        21: ["necromancer", "vampire", "ninja", "assassin", "bomber", "chainsaw"],
-        22: ["mirror", "mimic", "sniper", "shield", "wizard", "summoner"],
-        23: ["tank", "healer", "necromancer", "assassin", "ninja", "charger", "berserker"],
-        24: ["sniper", "wizard", "archer", "ice_mage", "fortifier", "shield", "summoner"],
-        25: ["tank", "healer", "necromancer", "mirror", "mimic", "sniper", "assassin", "ninja"],
+        5:  ["trapper", "swordsman", "zombie"],
+        6:  ["berserker", "spearman", "chainsaw"],
+        7:  ["bomber", "trapper", "swordsman", "zombie"],
+        8:  ["vampire", "charger", "berserker", "spearman"],
+        9:  ["archer", "ice_mage", "chainsaw", "bomber", "zombie"],
+        10: ["BOSS"],  # boss wave
+        11: ["ninja", "vampire", "berserker", "spearman", "swordsman"],
+        12: ["assassin", "shield", "archer", "charger", "trapper"],
+        13: ["wizard", "fortifier", "ice_mage", "chainsaw", "bomber"],
+        14: ["summoner", "ninja", "vampire", "berserker", "sniper"],
+        15: ["healer", "tank", "shield", "assassin", "archer", "wizard"],
+        16: ["necromancer", "charger", "berserker", "ninja", "sniper", "bomber"],
+        17: ["mirror", "mimic", "wizard", "ice_mage", "fortifier", "summoner"],
+        18: ["tank", "healer", "sniper", "assassin", "ninja", "charger", "berserker"],
+        19: ["necromancer", "mirror", "mimic", "shield", "wizard", "summoner", "vampire"],
+        20: ["BOSS"],  # boss wave
+        21: ["tank", "healer", "necromancer", "sniper", "assassin", "ninja", "wizard", "charger"],
+        22: ["mirror", "mimic", "sniper", "shield", "summoner", "ice_mage", "fortifier", "bomber"],
+        23: ["tank", "healer", "necromancer", "assassin", "ninja", "charger", "berserker", "sniper"],
+        24: ["mirror", "wizard", "archer", "ice_mage", "fortifier", "shield", "summoner", "tank", "healer"],
+        25: ["BOSS"],  # boss wave
     }
+
+    def make_boss(wave, team_id, x, y):
+        """Create a boss ball for the given wave."""
+        color_e = TEAM_COLORS[1]
+        if wave == 10:
+            # Tank boss: 300 HP, sniper ability at archer speed
+            boss = Ball(x, y, (180, 40, 40), team_id, "tank")
+            boss.hp = 300
+            boss.max_hp = 300
+            boss.is_boss = True
+            boss.boss_abilities = {"sniper"}
+            boss.boss_cooldown_overrides = {"sniper_cooldown": ARCHER_COOLDOWN}
+            boss.radius = int(BALL_RADIUS * 2.0)
+        elif wave == 20:
+            # Assassin boss: 150 HP, trapper + assassin, summons 3 of killed role
+            boss = Ball(x, y, (160, 50, 160), team_id, "assassin")
+            boss.hp = 150
+            boss.max_hp = 150
+            boss.is_boss = True
+            boss.boss_abilities = {"trapper"}
+            boss.boss_summon_count = 3
+            boss.radius = int(BALL_RADIUS * 1.8)
+        elif wave == 25:
+            # Tank boss: 500 HP, trapper + sniper (archer speed) + bomber
+            boss = Ball(x, y, (200, 160, 30), team_id, "tank")
+            boss.hp = 500
+            boss.max_hp = 500
+            boss.is_boss = True
+            boss.boss_abilities = {"trapper", "sniper", "bomber"}
+            boss.boss_cooldown_overrides = {"sniper_cooldown": ARCHER_COOLDOWN}
+            boss.radius = int(BALL_RADIUS * 2.2)
+        elif wave == 50:
+            # Berserker boss: 750 HP, wizard + ice_mage + sniper + bomber + vampire lifesteal
+            boss = Ball(x, y, (40, 200, 40), team_id, "berserker")
+            boss.hp = 750
+            boss.max_hp = 750
+            boss.is_boss = True
+            boss.boss_abilities = {"wizard", "ice_mage", "sniper", "bomber", "tank"}
+            boss.boss_cooldown_overrides = {"sniper_cooldown": ARCHER_COOLDOWN}
+            boss.boss_summon_count = 2
+            boss.radius = int(BALL_RADIUS * 2.5)
+        elif wave == 100:
+            # FINAL BOSS: 1000 HP, ALL abilities, self-heal, summons 5 per kill
+            boss = Ball(x, y, (255, 215, 0), team_id, "tank")
+            boss.hp = 1000
+            boss.max_hp = 1000
+            boss.is_boss = True
+            boss.boss_abilities = {
+                "sniper", "archer", "wizard", "ice_mage", "spearman",
+                "bomber", "trapper", "fortifier", "healer",
+            }
+            boss.boss_self_heal = True
+            boss.boss_cooldown_overrides = {"sniper_cooldown": ARCHER_COOLDOWN}
+            boss.boss_summon_count = 5
+            boss.radius = int(BALL_RADIUS * 3.0)
+        else:
+            boss = Ball(x, y, color_e, team_id, "tank")
+            boss.hp = 200
+            boss.max_hp = 200
+            boss.is_boss = True
+            boss.radius = int(BALL_RADIUS * 1.5)
+        return boss
 
     def get_enemy_wave(wave):
         if wave in WAVE_TABLE:
             return list(WAVE_TABLE[wave])
-        # past wave 25: use wave 25 as base, add 1 extra unit per 2 waves
-        base = list(WAVE_TABLE[25])
-        extras = (wave - 25) // 2
-        all_hard = ["tank", "healer", "necromancer", "sniper", "assassin", "ninja",
-                    "wizard", "mirror", "mimic", "charger", "shield", "summoner",
-                    "vampire", "berserker", "archer", "ice_mage", "fortifier"]
-        for _ in range(extras):
-            base.append(random.choice(all_hard))
-        return base
+        # past wave 25: harder scaling, add 1 extra hard unit per wave
+        hard_base = ["tank", "healer", "necromancer", "sniper", "assassin", "ninja",
+                     "wizard", "mirror", "mimic", "charger", "shield", "summoner",
+                     "vampire", "berserker", "archer", "ice_mage", "fortifier"]
+        # base size grows with wave
+        count = min(8 + (wave - 25), 15)
+        roster = []
+        for _ in range(count):
+            roster.append(random.choice(hard_base))
+        # boss waves past 25 that are multiples of 25 or 50
+        if wave in BOSS_WAVES:
+            roster = ["BOSS"]
+        return roster
 
     # ── direction system ──
     DIRECTIONS = ["N", "S", "E", "W", "NE", "NW", "SE", "SW"]
@@ -5194,6 +5283,9 @@ def interactive_mode():
         max_view_scroll = max(0, content_h - shop_h)
         message = ""
         message_timer = 0
+        cheat_seq = []  # tracks b, a, l key sequence
+        cheat_input_active = False
+        cheat_text = ""
 
         while True:
             mx, my = pygame.mouse.get_pos()
@@ -5203,6 +5295,40 @@ def interactive_mode():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
+
+                # cheat code input mode
+                if cheat_input_active:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_RETURN and cheat_text.strip().isdigit():
+                            target_wave = int(cheat_text.strip())
+                            if target_wave >= 1:
+                                return "skip", player_team, gold, target_wave
+                        elif event.key == pygame.K_ESCAPE:
+                            cheat_input_active = False
+                            cheat_text = ""
+                        elif event.key == pygame.K_BACKSPACE:
+                            cheat_text = cheat_text[:-1]
+                        elif event.unicode.isdigit():
+                            cheat_text += event.unicode
+                    continue  # skip all other input while cheat prompt is open
+
+                # cheat code detection: Shift+Ctrl + B, A, L in sequence
+                if event.type == pygame.KEYDOWN:
+                    mods = pygame.key.get_mods()
+                    if mods & pygame.KMOD_SHIFT and mods & pygame.KMOD_CTRL:
+                        if event.key == pygame.K_b and len(cheat_seq) == 0:
+                            cheat_seq.append("b")
+                        elif event.key == pygame.K_a and cheat_seq == ["b"]:
+                            cheat_seq.append("a")
+                        elif event.key == pygame.K_l and cheat_seq == ["b", "a"]:
+                            cheat_input_active = True
+                            cheat_text = ""
+                            cheat_seq = []
+                        else:
+                            cheat_seq = []
+                    else:
+                        cheat_seq = []
+
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 4:
                     # scroll up: try view scroll first, then shop scroll
                     if view_scroll > 0:
@@ -5271,9 +5397,13 @@ def interactive_mode():
                         rx = 120 + vi * 52
                         role_rect = pygame.Rect(rx, buy_y, 48, 60)
                         if role_rect.collidepoint(mx, my):
+                            MAX_TEAM_SIZE = 20
                             role = SHOP_ROLES[idx]
                             price = ROLE_PRICES[role]
-                            if gold >= price:
+                            if len(player_team) >= MAX_TEAM_SIZE:
+                                message = f"Team full! Max {MAX_TEAM_SIZE} units."
+                                message_timer = 120
+                            elif gold >= price:
                                 gold -= price
                                 max_hp = TANK_HP if role == "tank" else 100
                                 player_team.append({"role": role, "hp": max_hp})
@@ -5290,7 +5420,10 @@ def interactive_mode():
             vs = view_scroll  # shorthand
 
             # title (fixed at top)
-            title = title_font.render(f"Wave {wave}", True, (255, 255, 255))
+            if wave in BOSS_WAVES:
+                title = title_font.render(f"Wave {wave} - BOSS!", True, (255, 80, 80))
+            else:
+                title = title_font.render(f"Wave {wave}", True, (255, 255, 255))
             screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 12))
             gold_text = font.render(f"Gold: {gold}", True, (255, 215, 80))
             screen.blit(gold_text, (WIDTH // 2 - gold_text.get_width() // 2, 52))
@@ -5421,11 +5554,26 @@ def interactive_mode():
                 msg = font.render(message, True, (255, 255, 180))
                 screen.blit(msg, (WIDTH // 2 - msg.get_width() // 2, HEIGHT - 140))
 
+            # cheat code input overlay
+            if cheat_input_active:
+                overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+                overlay.fill((0, 0, 0, 180))
+                screen.blit(overlay, (0, 0))
+                prompt = title_font.render("Skip to Wave:", True, (255, 255, 100))
+                screen.blit(prompt, (WIDTH // 2 - prompt.get_width() // 2, HEIGHT // 2 - 50))
+                input_box = pygame.Rect(WIDTH // 2 - 80, HEIGHT // 2, 160, 36)
+                pygame.draw.rect(screen, (50, 50, 70), input_box, border_radius=6)
+                pygame.draw.rect(screen, (200, 200, 100), input_box, 2, border_radius=6)
+                it = font.render(cheat_text + "_", True, (255, 255, 255))
+                screen.blit(it, (input_box.x + 10, input_box.y + 8))
+                hint = small_font.render("Enter number, ESC to cancel", True, (150, 150, 150))
+                screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT // 2 + 45))
+
             pygame.display.flip()
             clock.tick(60)
 
     # ── battle ──
-    def run_battle(player_team, enemy_roles, directions, pre_walls=None, pre_traps=None, pre_bombs=None, arena_size=None):
+    def run_battle(player_team, enemy_roles, directions, pre_walls=None, pre_traps=None, pre_bombs=None, arena_size=None, wave_num=0):
         global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
 
         total = len(player_team) + len(enemy_roles)
@@ -5461,15 +5609,20 @@ def interactive_mode():
         # spawn enemies from directions (streaming from edges)
         color_e = TEAM_COLORS[1]
         margin = BALL_RADIUS + 10
+        boss_ball = None
         for idx, role in enumerate(enemy_roles):
             d = directions[idx % len(directions)]
             ex, ey = direction_spawn_pos(d, aw, ah, margin)
-            # add some spread so they don't stack
             ex += random.randint(-40, 40)
             ey += random.randint(-40, 40)
             ex = max(margin, min(aw - margin, ex))
             ey = max(margin, min(ah - margin, ey))
-            b = Ball(ex, ey, color_e, 1, role)
+            if role == "BOSS":
+                # spawn boss at center of spawn edge
+                b = make_boss(wave_num, 1, ex, ey)
+                boss_ball = b
+            else:
+                b = Ball(ex, ey, color_e, 1, role)
             balls.append(b)
 
         # load pre-placed objects from setup phase
@@ -5596,6 +5749,10 @@ def interactive_mode():
                                     s.alive = False
                                     break
                             b.take_damage(SPEAR_DAMAGE)
+                            # bosses can't be pinned/carried by spears
+                            if b.is_boss:
+                                s.alive = False
+                                break
                             if b.trapped_in is not None:
                                 b.trapped_in.captured_ball = None
                                 b.trapped_in.alive = False
@@ -6018,7 +6175,7 @@ def interactive_mode():
                             dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
                             b.apply_knockback(ddx / dd, ddy / dd, 6.0)
 
-                # necromancer resurrection + kill bounty
+                # necromancer resurrection + kill bounty + boss summon-on-kill
                 newly_dead = []
                 for b in balls:
                     if b.hp <= 0 and b.alive:
@@ -6027,6 +6184,18 @@ def interactive_mode():
                         # award gold for killing enemies
                         if b.team_id == 1 and not b.is_minion:
                             kill_gold += KILL_BOUNTY.get(b.role, 10)
+                        # boss summon-on-kill: spawn copies of the killed role
+                        if b.team_id == 0 and not b.is_minion:
+                            for boss_b in alive_balls:
+                                if boss_b.is_boss and boss_b.alive and boss_b.boss_summon_count > 0:
+                                    for _sc in range(boss_b.boss_summon_count):
+                                        sx = boss_b.x + random.randint(-60, 60)
+                                        sy = boss_b.y + random.randint(-60, 60)
+                                        sx = max(BALL_RADIUS, min(aw - BALL_RADIUS, sx))
+                                        sy = max(BALL_RADIUS, min(ah - BALL_RADIUS, sy))
+                                        minion = Ball(sx, sy, boss_b.color, boss_b.team_id, b.role)
+                                        minion.is_minion = True
+                                        balls.append(minion)
                 for necro in alive_balls:
                     if necro.role != "necromancer" or not necro.alive or necro.necro_cooldown > 0:
                         continue
@@ -6087,6 +6256,22 @@ def interactive_mode():
                 pygame.draw.circle(screen, (255, 255, 100), (int(commander.x), int(commander.y)), commander.radius + 5, 2)
                 cmd_label = small_font.render("CMD", True, (255, 255, 100))
                 screen.blit(cmd_label, (int(commander.x) - cmd_label.get_width() // 2, int(commander.y) - commander.radius - 16))
+            # boss highlight + HP bar
+            if boss_ball is not None and boss_ball.alive:
+                bx, by = int(boss_ball.x), int(boss_ball.y)
+                pygame.draw.circle(screen, (255, 50, 50), (bx, by), boss_ball.radius + 6, 3)
+                boss_label = font.render("BOSS", True, (255, 50, 50))
+                screen.blit(boss_label, (bx - boss_label.get_width() // 2, by - boss_ball.radius - 22))
+                # big HP bar at top of screen
+                bar_w = 300
+                bar_h = 16
+                bar_x = WIDTH // 2 - bar_w // 2
+                bar_y = HEIGHT - 30
+                pygame.draw.rect(screen, (60, 20, 20), (bar_x - 2, bar_y - 2, bar_w + 4, bar_h + 4))
+                hp_frac = max(0, boss_ball.hp / boss_ball.max_hp)
+                pygame.draw.rect(screen, (200, 30, 30), (bar_x, bar_y, int(bar_w * hp_frac), bar_h))
+                hp_text = font.render(f"BOSS: {boss_ball.hp}/{boss_ball.max_hp}", True, (255, 200, 200))
+                screen.blit(hp_text, (bar_x + bar_w // 2 - hp_text.get_width() // 2, bar_y - 1))
             for s in spears:
                 s.draw(screen)
             for bl in bullets:
@@ -6136,10 +6321,16 @@ def interactive_mode():
                     sys.exit()
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if accept_btn.collidepoint(mx, my):
-                        # accept: gain all enemy units at full HP for free
+                        # accept: gain enemy units, or gold if team is full
                         for role in enemy_roles:
-                            max_hp = TANK_HP if role == "tank" else 100
-                            player_team.append({"role": role, "hp": max_hp})
+                            if role == "BOSS":
+                                continue
+                            if len(player_team) >= 20:
+                                # team full — give sell value as gold instead
+                                gold += ROLE_PRICES.get(role, 30) // 2
+                            else:
+                                max_hp = TANK_HP if role == "tank" else 100
+                                player_team.append({"role": role, "hp": max_hp})
                         return "accept", player_team, gold
                     if decline_btn.collidepoint(mx, my):
                         return "decline", player_team, gold
@@ -6186,16 +6377,25 @@ def interactive_mode():
         enemy_roles = get_enemy_wave(wave)
         directions = pick_directions(wave)
 
-        action, player_team, gold = shop_screen(player_team, gold, wave, enemy_roles)
+        shop_result = shop_screen(player_team, gold, wave, enemy_roles)
+        if len(shop_result) == 4:
+            action, player_team, gold, target_wave = shop_result
+        else:
+            action, player_team, gold = shop_result
+            target_wave = None
         if action == "quit":
             return
+        if action == "skip" and target_wave is not None:
+            wave = target_wave
+            gold += 500  # bonus gold for skipping
+            continue
 
-        # check for enemy surrender: if player power >= 25% more than enemy
+        # check for enemy surrender (not on boss waves)
         player_power = sum(ROLE_PRICES.get(info["role"], 30) * (info["hp"] / (TANK_HP if info["role"] == "tank" else 100))
                           for info in player_team)
         enemy_power = sum(ROLE_PRICES.get(r, 30) for r in enemy_roles)
         surrendered = False
-        if player_power >= enemy_power * 1.25 and random.random() < 0.25:
+        if wave not in BOSS_WAVES and player_power >= enemy_power * 1.25 and random.random() < 0.25:
             result, player_team, gold = surrender_screen(player_team, enemy_roles, gold, wave)
             if result == "accept":
                 surrendered = True
@@ -6209,7 +6409,7 @@ def interactive_mode():
             survivors, won, earned = run_battle(
                 placed_team, enemy_roles, directions,
                 pre_walls=setup_w, pre_traps=setup_t, pre_bombs=setup_b,
-                arena_size=(aw, ah))
+                arena_size=(aw, ah), wave_num=wave)
             gold += earned
 
             if not won or not survivors:
@@ -6237,13 +6437,13 @@ def interactive_mode():
                     clock.tick(60)
                 return
 
-            # survivors get 15 HP regen (capped at max)
+            # survivors get 10 HP regen (capped at max)
             for info in survivors:
                 max_hp = TANK_HP if info["role"] == "tank" else 100
-                info["hp"] = min(max_hp, info["hp"] + 15)
+                info["hp"] = min(max_hp, info["hp"] + 10)
             player_team = survivors
 
-        gold += 50 + wave * 10
+        gold += 30 + wave * 5
         wave += 1
 
 
