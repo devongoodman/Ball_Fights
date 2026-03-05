@@ -4683,13 +4683,21 @@ def interactive_mode():
     global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
 
     ROLE_PRICES = {
-        "zombie": 25,
-        "swordsman": 40, "spearman": 40, "trapper": 40,
+        "zombie": 30,
+        "swordsman": 40, "spearman": 75, "trapper": 75,
         "berserker": 50, "chainsaw": 50, "charger": 50, "bomber": 50,
         "vampire": 60, "archer": 60, "fortifier": 60, "ice_mage": 60,
         "ninja": 75, "assassin": 75, "shield": 75, "wizard": 75, "summoner": 75,
         "sniper": 80, "mimic": 80, "mirror": 80,
-        "healer": 100, "necromancer": 100, "tank": 100,
+        "healer": 100, "necromancer": 75, "tank": 100,
+    }
+    KILL_BOUNTY = {
+        "zombie": 10, "swordsman": 15, "spearman": 15, "trapper": 15,
+        "berserker": 20, "chainsaw": 20, "charger": 20, "bomber": 20,
+        "vampire": 25, "archer": 25, "fortifier": 25, "ice_mage": 25,
+        "ninja": 30, "assassin": 30, "shield": 30, "wizard": 30, "summoner": 30,
+        "sniper": 35, "mimic": 35, "mirror": 35,
+        "healer": 40, "necromancer": 30, "tank": 40,
     }
     HEAL_POTION_COST = 30
     SHOP_ROLES = [
@@ -4717,73 +4725,108 @@ def interactive_mode():
         else:
             return 960, 720
 
+    # structured waves — each wave has a fixed roster, gets harder each level
+    WAVE_TABLE = {
+        1:  ["zombie"],
+        2:  ["zombie", "zombie"],
+        3:  ["swordsman", "zombie"],
+        4:  ["swordsman", "spearman"],
+        5:  ["zombie", "zombie", "swordsman"],
+        6:  ["trapper", "swordsman", "zombie"],
+        7:  ["berserker", "spearman", "zombie"],
+        8:  ["bomber", "chainsaw", "swordsman"],
+        9:  ["trapper", "berserker", "spearman", "zombie"],
+        10: ["vampire", "swordsman", "zombie", "zombie"],
+        11: ["archer", "chainsaw", "bomber", "zombie"],
+        12: ["fortifier", "ice_mage", "spearman", "swordsman"],
+        13: ["charger", "vampire", "berserker", "trapper"],
+        14: ["archer", "ice_mage", "chainsaw", "swordsman", "zombie"],
+        15: ["ninja", "vampire", "berserker", "spearman", "zombie"],
+        16: ["assassin", "shield", "archer", "swordsman", "zombie"],
+        17: ["wizard", "fortifier", "charger", "chainsaw", "trapper"],
+        18: ["summoner", "ninja", "vampire", "berserker", "spearman"],
+        19: ["sniper", "shield", "assassin", "archer", "ice_mage", "zombie"],
+        20: ["healer", "tank", "wizard", "charger", "berserker", "swordsman"],
+        21: ["necromancer", "vampire", "ninja", "assassin", "bomber", "chainsaw"],
+        22: ["mirror", "mimic", "sniper", "shield", "wizard", "summoner"],
+        23: ["tank", "healer", "necromancer", "assassin", "ninja", "charger", "berserker"],
+        24: ["sniper", "wizard", "archer", "ice_mage", "fortifier", "shield", "summoner"],
+        25: ["tank", "healer", "necromancer", "mirror", "mimic", "sniper", "assassin", "ninja"],
+    }
+
     def get_enemy_wave(wave):
-        if wave <= 3:
-            pool = ["zombie", "swordsman", "spearman"]
-            count = random.randint(1, 2) + wave // 3
-        elif wave <= 6:
-            pool = ["zombie", "swordsman", "spearman", "trapper", "bomber", "berserker", "chainsaw"]
-            count = random.randint(2, 3) + wave // 3
-        elif wave <= 10:
-            pool = ["zombie", "swordsman", "spearman", "trapper", "bomber", "berserker", "chainsaw",
-                    "vampire", "archer", "fortifier", "ice_mage", "charger"]
-            count = random.randint(3, 5) + wave // 3
-        elif wave <= 15:
-            pool = ["zombie", "swordsman", "spearman", "trapper", "bomber", "berserker", "chainsaw",
-                    "vampire", "archer", "fortifier", "ice_mage", "charger",
-                    "ninja", "assassin", "shield", "wizard", "summoner"]
-            count = random.randint(4, 6) + wave // 3
-        else:
-            pool = list(SHOP_ROLES)
-            count = random.randint(5, 8) + wave // 3
-        return [random.choice(pool) for _ in range(count)]
+        if wave in WAVE_TABLE:
+            return list(WAVE_TABLE[wave])
+        # past wave 25: use wave 25 as base, add 1 extra unit per 2 waves
+        base = list(WAVE_TABLE[25])
+        extras = (wave - 25) // 2
+        all_hard = ["tank", "healer", "necromancer", "sniper", "assassin", "ninja",
+                    "wizard", "mirror", "mimic", "charger", "shield", "summoner",
+                    "vampire", "berserker", "archer", "ice_mage", "fortifier"]
+        for _ in range(extras):
+            base.append(random.choice(all_hard))
+        return base
 
     # ── shop screen ──
     def shop_screen(player_team, gold, wave, next_enemies):
         global WIDTH, HEIGHT, screen
-        # size the shop screen to fit content
+        # width as wide as needed, height capped at 700
         shop_w = max(800, 220 + len(SHOP_ROLES) * 52)
-        shop_h = max(500, 160 + max(len(player_team), len(next_enemies)) * 48 + 140)
+        MAX_SHOP_H = 700
+        content_h = max(500, 160 + max(len(player_team), len(next_enemies)) * 48 + 140)
+        shop_h = min(content_h, MAX_SHOP_H)
         WIDTH, HEIGHT = shop_w, shop_h
         screen = pygame.display.set_mode((WIDTH, HEIGHT))
 
         selected_ball = None
-        scroll_offset = 0
+        scroll_offset = 0  # shop role scroll
         max_visible = max(1, (WIDTH - 240) // 52)
         max_scroll = max(0, len(SHOP_ROLES) - max_visible)
+        view_scroll = 0  # vertical scroll for the whole view
+        max_view_scroll = max(0, content_h - shop_h)
         message = ""
         message_timer = 0
 
         while True:
             mx, my = pygame.mouse.get_pos()
+            # adjust mouse y for vertical scroll
+            amy = my + view_scroll
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 4:
-                    scroll_offset = max(0, scroll_offset - 1)
+                    # scroll up: try view scroll first, then shop scroll
+                    if view_scroll > 0:
+                        view_scroll = max(0, view_scroll - 30)
+                    else:
+                        scroll_offset = max(0, scroll_offset - 1)
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 5:
-                    scroll_offset = min(max_scroll, scroll_offset + 1)
+                    # scroll down: try view scroll first, then shop scroll
+                    if view_scroll < max_view_scroll:
+                        view_scroll = min(max_view_scroll, view_scroll + 30)
+                    else:
+                        scroll_offset = min(max_scroll, scroll_offset + 1)
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    # fight button
+                    # fight button (fixed at bottom of screen)
                     fight_rect = pygame.Rect(WIDTH // 2 - 130, HEIGHT - 50, 120, 40)
                     if fight_rect.collidepoint(mx, my) and len(player_team) > 0:
                         return "fight", player_team, gold
-                    # quit button
+                    # quit button (fixed at bottom of screen)
                     quit_rect = pygame.Rect(WIDTH // 2 + 10, HEIGHT - 50, 120, 40)
                     if quit_rect.collidepoint(mx, my):
                         return "quit", player_team, gold
 
-                    # click on player ball to select
+                    # click on player ball to select (scrolled)
                     for i, info in enumerate(player_team):
-                        bx, by = 55, 120 + i * 48
+                        bx, by = 55, 120 + i * 48 - view_scroll
                         if (mx - bx) ** 2 + (my - by) ** 2 <= (BALL_RADIUS + 8) ** 2:
                             selected_ball = i
                             break
 
-                    # heal button
+                    # heal button (scrolled)
                     if selected_ball is not None and 0 <= selected_ball < len(player_team):
-                        heal_rect = pygame.Rect(140, 120 + selected_ball * 48 - 14, 50, 28)
+                        heal_rect = pygame.Rect(140, 120 + selected_ball * 48 - 14 - view_scroll, 50, 28)
                         if heal_rect.collidepoint(mx, my):
                             info = player_team[selected_ball]
                             max_hp = TANK_HP if info["role"] == "tank" else 100
@@ -4793,7 +4836,20 @@ def interactive_mode():
                                 message = f"Healed {info['role'].capitalize()}!"
                                 message_timer = 120
 
-                    # buy role
+                    # sell button (scrolled)
+                    if selected_ball is not None and 0 <= selected_ball < len(player_team):
+                        sell_rect = pygame.Rect(140, 120 + selected_ball * 48 + 16 - view_scroll, 50, 28)
+                        if sell_rect.collidepoint(mx, my):
+                            info = player_team[selected_ball]
+                            sell_price = ROLE_PRICES.get(info["role"], 30) // 2
+                            gold += sell_price
+                            sold_name = info["role"].capitalize()
+                            player_team.pop(selected_ball)
+                            selected_ball = None
+                            message = f"Sold {sold_name}! (+{sell_price}g)"
+                            message_timer = 120
+
+                    # buy role (fixed near bottom)
                     buy_y = HEIGHT - 100
                     for idx in range(len(SHOP_ROLES)):
                         vi = idx - scroll_offset
@@ -4810,6 +4866,7 @@ def interactive_mode():
                                 player_team.append({"role": role, "hp": max_hp})
                                 message = f"Bought {role.capitalize()}! (-{price}g)"
                                 message_timer = 120
+                                max_view_scroll = max(0, (160 + max(len(player_team), len(next_enemies)) * 48 + 140) - shop_h)
                             else:
                                 message = f"Not enough gold! Need {price}g"
                                 message_timer = 120
@@ -4817,32 +4874,37 @@ def interactive_mode():
 
             # ── draw shop ──
             screen.fill((24, 24, 36))
+            vs = view_scroll  # shorthand
 
-            # title
+            # title (fixed at top)
             title = title_font.render(f"Wave {wave}", True, (255, 255, 255))
             screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 12))
             gold_text = font.render(f"Gold: {gold}", True, (255, 215, 80))
             screen.blit(gold_text, (WIDTH // 2 - gold_text.get_width() // 2, 52))
 
-            # left panel: your team
+            # scroll indicator
+            if max_view_scroll > 0:
+                si = small_font.render(f"Scroll: {view_scroll}/{max_view_scroll}", True, (100, 100, 120))
+                screen.blit(si, (10, 55))
+
+            # left panel: your team (scrollable)
             panel_h = max(200, len(player_team) * 48 + 40)
-            pygame.draw.rect(screen, (35, 40, 55), (10, 90, 195, panel_h), border_radius=8)
+            pygame.draw.rect(screen, (35, 40, 55), (10, 90 - vs, 195, panel_h), border_radius=8)
             team_label = font.render("Your Team", True, (120, 200, 255))
-            screen.blit(team_label, (55, 95))
+            screen.blit(team_label, (55, 95 - vs))
             for i, info in enumerate(player_team):
-                bx, by = 55, 120 + i * 48
+                bx, by = 55, 120 + i * 48 - vs
+                if by < 60 or by > HEIGHT - 120:
+                    continue  # clip off-screen items
                 role = info["role"]
                 hp = info["hp"]
                 max_hp = TANK_HP if role == "tank" else 100
                 c = TEAM_COLORS[0]
-                # ball
                 pygame.draw.circle(screen, c, (bx, by), 14)
                 if selected_ball == i:
                     pygame.draw.circle(screen, (255, 255, 100), (bx, by), 17, 2)
-                # role name
                 rl = small_font.render(role.capitalize(), True, (220, 220, 255))
                 screen.blit(rl, (bx + 20, by - 14))
-                # hp bar
                 bar_w = 70
                 bar_x = bx + 20
                 bar_y = by + 4
@@ -4853,24 +4915,38 @@ def interactive_mode():
                 hp_label = small_font.render(f"{hp}/{max_hp}", True, (180, 180, 180))
                 screen.blit(hp_label, (bar_x + bar_w + 4, bar_y - 4))
 
-            # heal button for selected
+            # heal & sell buttons for selected (scrollable)
             if selected_ball is not None and 0 <= selected_ball < len(player_team):
-                heal_rect = pygame.Rect(140, 120 + selected_ball * 48 - 14, 50, 28)
-                hc = (60, 180, 60) if heal_rect.collidepoint(mx, my) else (50, 140, 50)
-                pygame.draw.rect(screen, hc, heal_rect, border_radius=4)
-                hl = small_font.render(f"Heal", True, (255, 255, 255))
-                screen.blit(hl, (heal_rect.centerx - hl.get_width() // 2, heal_rect.centery - hl.get_height() // 2))
-                price_l = small_font.render(f"{HEAL_POTION_COST}g", True, (255, 215, 80))
-                screen.blit(price_l, (heal_rect.right + 4, heal_rect.centery - price_l.get_height() // 2))
+                sel_y = 120 + selected_ball * 48 - vs
+                if 60 < sel_y < HEIGHT - 120:
+                    # heal
+                    heal_rect = pygame.Rect(140, sel_y - 14, 50, 28)
+                    hc = (60, 180, 60) if heal_rect.collidepoint(mx, my) else (50, 140, 50)
+                    pygame.draw.rect(screen, hc, heal_rect, border_radius=4)
+                    hl = small_font.render("Heal", True, (255, 255, 255))
+                    screen.blit(hl, (heal_rect.centerx - hl.get_width() // 2, heal_rect.centery - hl.get_height() // 2))
+                    price_l = small_font.render(f"{HEAL_POTION_COST}g", True, (255, 215, 80))
+                    screen.blit(price_l, (heal_rect.right + 4, heal_rect.centery - price_l.get_height() // 2))
+                    # sell
+                    sell_rect = pygame.Rect(140, sel_y + 16, 50, 28)
+                    sc = (180, 60, 60) if sell_rect.collidepoint(mx, my) else (140, 50, 50)
+                    pygame.draw.rect(screen, sc, sell_rect, border_radius=4)
+                    sl = small_font.render("Sell", True, (255, 255, 255))
+                    screen.blit(sl, (sell_rect.centerx - sl.get_width() // 2, sell_rect.centery - sl.get_height() // 2))
+                    sell_price = ROLE_PRICES.get(player_team[selected_ball]["role"], 30) // 2
+                    sp_l = small_font.render(f"+{sell_price}g", True, (255, 215, 80))
+                    screen.blit(sp_l, (sell_rect.right + 4, sell_rect.centery - sp_l.get_height() // 2))
 
-            # right panel: enemy preview
+            # right panel: enemy preview (scrollable)
             epanel_x = WIDTH - 195
             epanel_h = max(200, len(next_enemies) * 40 + 40)
-            pygame.draw.rect(screen, (55, 35, 35), (epanel_x, 90, 185, epanel_h), border_radius=8)
+            pygame.draw.rect(screen, (55, 35, 35), (epanel_x, 90 - vs, 185, epanel_h), border_radius=8)
             enemy_label = font.render("Next Wave", True, (255, 120, 120))
-            screen.blit(enemy_label, (epanel_x + 40, 95))
+            screen.blit(enemy_label, (epanel_x + 40, 95 - vs))
             for i, role in enumerate(next_enemies):
-                ey = 120 + i * 40
+                ey = 120 + i * 40 - vs
+                if ey < 60 or ey > HEIGHT - 120:
+                    continue
                 pygame.draw.circle(screen, TEAM_COLORS[1], (epanel_x + 30, ey), 12)
                 rl = small_font.render(role.capitalize(), True, (255, 180, 180))
                 screen.blit(rl, (epanel_x + 50, ey - 8))
@@ -4966,6 +5042,7 @@ def interactive_mode():
         winner_team = None
         stale_timer = 0
         STALE_THRESHOLD = 7200
+        kill_gold = 0  # gold earned from killing enemies
 
         while True:
             for event in pygame.event.get():
@@ -4985,12 +5062,12 @@ def interactive_mode():
                         speed_index = 3
 
             if winner_team is not None:
-                # return survivors
+                # return survivors + gold earned from kills
                 survivors = []
                 for b in balls:
                     if b.team_id == 0 and b.alive:
                         survivors.append({"role": b.role, "hp": b.hp})
-                return survivors, (winner_team == 0)
+                return survivors, (winner_team == 0), kill_gold
 
             game_speed = speed_options[speed_index]
 
@@ -5500,12 +5577,15 @@ def interactive_mode():
                             dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
                             b.apply_knockback(ddx / dd, ddy / dd, 6.0)
 
-                # necromancer resurrection
+                # necromancer resurrection + kill bounty
                 newly_dead = []
                 for b in balls:
                     if b.hp <= 0 and b.alive:
                         b.alive = False
                         newly_dead.append(b)
+                        # award gold for killing enemies
+                        if b.team_id == 1 and not b.is_minion:
+                            kill_gold += KILL_BOUNTY.get(b.role, 10)
                 for necro in alive_balls:
                     if necro.role != "necromancer" or not necro.alive or necro.necro_cooldown > 0:
                         continue
@@ -5588,6 +5668,60 @@ def interactive_mode():
             pygame.display.flip()
             clock.tick(60)
 
+    # ── surrender screen ──
+    def surrender_screen(player_team, enemy_roles, gold, wave):
+        global WIDTH, HEIGHT, screen
+        WIDTH, HEIGHT = 600, 450
+        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+        accept_btn = pygame.Rect(WIDTH // 2 - 160, HEIGHT - 80, 140, 40)
+        decline_btn = pygame.Rect(WIDTH // 2 + 20, HEIGHT - 80, 140, 40)
+
+        while True:
+            mx, my = pygame.mouse.get_pos()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if accept_btn.collidepoint(mx, my):
+                        # accept: gain all enemy units at full HP for free
+                        for role in enemy_roles:
+                            max_hp = TANK_HP if role == "tank" else 100
+                            player_team.append({"role": role, "hp": max_hp})
+                        return "accept", player_team, gold
+                    if decline_btn.collidepoint(mx, my):
+                        return "decline", player_team, gold
+
+            screen.fill((24, 24, 36))
+            t = title_font.render("Enemy Surrender!", True, (255, 220, 80))
+            screen.blit(t, (WIDTH // 2 - t.get_width() // 2, 30))
+
+            desc = font.render("The enemy sees your strength and offers to yield.", True, (200, 200, 220))
+            screen.blit(desc, (WIDTH // 2 - desc.get_width() // 2, 80))
+            desc2 = font.render("Accept: gain their units free. Decline: fight for kill gold.", True, (180, 180, 200))
+            screen.blit(desc2, (WIDTH // 2 - desc2.get_width() // 2, 110))
+
+            # show enemy units being offered
+            ey = 150
+            for i, role in enumerate(enemy_roles):
+                pygame.draw.circle(screen, TEAM_COLORS[1], (WIDTH // 2 - 60 + (i % 6) * 40, ey + (i // 6) * 45), 14)
+                rl = small_font.render(role[:6].capitalize(), True, (255, 180, 180))
+                screen.blit(rl, (WIDTH // 2 - 75 + (i % 6) * 40, ey + (i // 6) * 45 + 16))
+
+            # buttons
+            ac = (60, 180, 60) if accept_btn.collidepoint(mx, my) else (50, 150, 50)
+            dc = (180, 60, 60) if decline_btn.collidepoint(mx, my) else (150, 50, 50)
+            pygame.draw.rect(screen, ac, accept_btn, border_radius=6)
+            pygame.draw.rect(screen, dc, decline_btn, border_radius=6)
+            al = font.render("ACCEPT", True, (255, 255, 255))
+            dl = font.render("DECLINE", True, (255, 255, 255))
+            screen.blit(al, (accept_btn.centerx - al.get_width() // 2, accept_btn.centery - al.get_height() // 2))
+            screen.blit(dl, (decline_btn.centerx - dl.get_width() // 2, decline_btn.centery - dl.get_height() // 2))
+
+            pygame.display.flip()
+            clock.tick(60)
+
     # ── main interactive loop ──
     gold = 200
     wave = 1
@@ -5599,36 +5733,51 @@ def interactive_mode():
         if action == "quit":
             return
 
-        survivors, won = run_battle(player_team, enemy_roles)
+        # check for enemy surrender: if player power >= 25% more than enemy
+        player_power = sum(ROLE_PRICES.get(info["role"], 30) * (info["hp"] / (TANK_HP if info["role"] == "tank" else 100))
+                          for info in player_team)
+        enemy_power = sum(ROLE_PRICES.get(r, 30) for r in enemy_roles)
+        surrendered = False
+        if player_power >= enemy_power * 1.25 and random.random() < 0.25:
+            result, player_team, gold = surrender_screen(player_team, enemy_roles, gold, wave)
+            if result == "accept":
+                surrendered = True
 
-        if not won or not survivors:
-            # game over screen
-            WIDTH, HEIGHT = 600, 450
-            screen = pygame.display.set_mode((WIDTH, HEIGHT))
-            screen.fill((30, 10, 10))
-            t = big_font.render("Game Over!", True, (255, 80, 80))
-            wv = font.render(f"You reached Wave {wave}", True, (255, 255, 255))
-            hint = small_font.render("Click to return to menu", True, (150, 150, 150))
-            screen.blit(t, (WIDTH // 2 - t.get_width() // 2, HEIGHT // 2 - 60))
-            screen.blit(wv, (WIDTH // 2 - wv.get_width() // 2, HEIGHT // 2))
-            screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT // 2 + 40))
-            pygame.display.flip()
-            waiting = True
-            while waiting:
-                for ev in pygame.event.get():
-                    if ev.type == pygame.QUIT:
-                        pygame.quit()
-                        sys.exit()
-                    if ev.type == pygame.MOUSEBUTTONDOWN or ev.type == pygame.KEYDOWN:
-                        waiting = False
-                clock.tick(60)
-            return
+        if not surrendered:
+            survivors, won, earned = run_battle(player_team, enemy_roles)
+            gold += earned
 
-        # survivors get 15 HP regen (capped at max)
-        for info in survivors:
-            max_hp = TANK_HP if info["role"] == "tank" else 100
-            info["hp"] = min(max_hp, info["hp"] + 15)
-        player_team = survivors
+            if not won or not survivors:
+                # game over screen
+                WIDTH, HEIGHT = 600, 450
+                screen = pygame.display.set_mode((WIDTH, HEIGHT))
+                screen.fill((30, 10, 10))
+                t = big_font.render("Game Over!", True, (255, 80, 80))
+                wv = font.render(f"You reached Wave {wave}", True, (255, 255, 255))
+                kg = font.render(f"Kill bounty earned: {earned}g", True, (255, 215, 80))
+                hint = small_font.render("Click to return to menu", True, (150, 150, 150))
+                screen.blit(t, (WIDTH // 2 - t.get_width() // 2, HEIGHT // 2 - 60))
+                screen.blit(wv, (WIDTH // 2 - wv.get_width() // 2, HEIGHT // 2))
+                screen.blit(kg, (WIDTH // 2 - kg.get_width() // 2, HEIGHT // 2 + 30))
+                screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT // 2 + 60))
+                pygame.display.flip()
+                waiting = True
+                while waiting:
+                    for ev in pygame.event.get():
+                        if ev.type == pygame.QUIT:
+                            pygame.quit()
+                            sys.exit()
+                        if ev.type == pygame.MOUSEBUTTONDOWN or ev.type == pygame.KEYDOWN:
+                            waiting = False
+                    clock.tick(60)
+                return
+
+            # survivors get 15 HP regen (capped at max)
+            for info in survivors:
+                max_hp = TANK_HP if info["role"] == "tank" else 100
+                info["hp"] = min(max_hp, info["hp"] + 15)
+            player_team = survivors
+
         gold += 50 + wave * 10
         wave += 1
 
