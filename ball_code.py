@@ -210,6 +210,27 @@ CHARGER_WINDUP = 40            # frames of slowing down before charge
 MIMIC_SPEED = 3.0
 MIMIC_COPY_DURATION = 600      # 10 seconds before next copy
 
+HAMMER_SPEED = 2.5
+HAMMER_LENGTH = BALL_RADIUS * 3        # longer than sword
+HAMMER_SPIN_SPEED = 0.03              # slow, heavy spin
+HAMMER_DAMAGE = 10
+HAMMER_KNOCKBACK = 20.0               # huge knockback
+HAMMER_HEAD_SIZE = 10                  # size of hammer head for tip-only hit detection
+HAMMER_HIT_COOLDOWN = 25
+
+FENCER_SPEED = 2.4
+FENCE_COOLDOWN = 180                   # same as bomber
+FENCE_DAMAGE = 3                       # damage per second while inside
+FENCE_DAMAGE_INTERVAL = 20            # frames between damage ticks (60fps / 3 = ~every 0.33s)
+FENCE_DURATION = 600                   # fence lasts 10 seconds
+FENCE_WIDTH = 6                        # visual thickness
+
+# King of the Hill constants
+KOTH_HILL_RADIUS = 80
+KOTH_SCORE_INTERVAL = 30    # frames between point awards (~0.5s)
+KOTH_WIN_SCORE = 100
+KOTH_RESPAWN_DELAY = 120    # frames (~2 seconds)
+
 TEAM_COLORS = [
     (220, 60, 60),    # red
     (60, 120, 220),   # blue
@@ -219,7 +240,7 @@ TEAM_COLORS = [
     (220, 130, 40),   # orange
 ]
 
-ROLES = ["zombie", "swordsman", "spearman", "trapper", "bomber", "healer", "ninja", "shield", "sniper", "berserker", "chainsaw", "fortifier", "vampire", "archer", "wizard", "tank", "assassin", "necromancer", "ice_mage", "summoner", "mirror", "charger", "mimic"]
+ROLES = ["zombie", "swordsman", "spearman", "trapper", "bomber", "healer", "ninja", "shield", "sniper", "berserker", "chainsaw", "fortifier", "vampire", "archer", "wizard", "tank", "assassin", "necromancer", "ice_mage", "summoner", "mirror", "charger", "mimic", "conqueror", "hammer", "fencer"]
 
 ROLE_SPEEDS = {
     "zombie": ZOMBIE_SPEED,
@@ -245,6 +266,9 @@ ROLE_SPEEDS = {
     "mirror": MIRROR_SPEED,
     "charger": CHARGER_SPEED,
     "mimic": MIMIC_SPEED,
+    "conqueror": ZOMBIE_SPEED,
+    "hammer": HAMMER_SPEED,
+    "fencer": FENCER_SPEED,
 }
 
 
@@ -686,6 +710,74 @@ class FortWall:
             pygame.draw.circle(surface, (200, 200, 200), (int(px), int(py)), 2)
 
 
+class Fence:
+    """A fence line between two posts. Enemies passing through take damage over time."""
+    def __init__(self, x1, y1, x2, y2, team_id, color):
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = x2
+        self.y2 = y2
+        self.team_id = team_id
+        self.color = color
+        self.alive = True
+        self.timer = FENCE_DURATION
+        self.damage_cooldowns = {}  # ball id -> frames until next damage tick
+
+    def update(self):
+        self.timer -= 1
+        if self.timer <= 0:
+            self.alive = False
+        # tick down per-ball cooldowns
+        expired = []
+        for bid in self.damage_cooldowns:
+            self.damage_cooldowns[bid] -= 1
+            if self.damage_cooldowns[bid] <= 0:
+                expired.append(bid)
+        for bid in expired:
+            del self.damage_cooldowns[bid]
+
+    def check_damage(self, ball):
+        """If ball is touching this fence line, deal damage. Returns True if hit."""
+        if not self.alive or ball.team_id == self.team_id:
+            return False
+        if not point_near_segment(ball.x, ball.y, self.x1, self.y1,
+                                  self.x2, self.y2, ball.radius + FENCE_WIDTH // 2):
+            return False
+        bid = id(ball)
+        if bid in self.damage_cooldowns:
+            return False
+        ball.take_damage(FENCE_DAMAGE)
+        self.damage_cooldowns[bid] = FENCE_DAMAGE_INTERVAL
+        return True
+
+    def draw(self, surface):
+        if not self.alive:
+            return
+        # fade as timer runs out
+        alpha = min(1.0, self.timer / 60.0)
+        c = tuple(min(255, int(v * (0.5 + 0.5 * alpha))) for v in self.color)
+        # main fence line
+        pygame.draw.line(surface, c, (int(self.x1), int(self.y1)),
+                         (int(self.x2), int(self.y2)), FENCE_WIDTH)
+        # fence posts at each end
+        pygame.draw.circle(surface, (180, 140, 80), (int(self.x1), int(self.y1)), 5)
+        pygame.draw.circle(surface, (180, 140, 80), (int(self.x2), int(self.y2)), 5)
+        # barb marks along fence
+        dx = self.x2 - self.x1
+        dy = self.y2 - self.y1
+        length = max(1, math.hypot(dx, dy))
+        nx, ny = dx / length, dy / length
+        px, py = -ny, nx  # perpendicular
+        marks = int(length / 20)
+        for i in range(1, marks):
+            t = i / marks
+            mx = self.x1 + dx * t
+            my = self.y1 + dy * t
+            pygame.draw.line(surface, c,
+                             (int(mx - px * 4), int(my - py * 4)),
+                             (int(mx + px * 4), int(my + py * 4)), 1)
+
+
 # ── UI helpers ──────────────────────────────────────────────
 
 class Button:
@@ -722,7 +814,7 @@ ARENA_SIZES = [
 ]
 
 
-def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None):
+def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, saved_game_mode=None):
     if saved_teams is not None and saved_num_teams is not None:
         teams = [list(t) for t in saved_teams]
         num_teams = saved_num_teams
@@ -753,6 +845,17 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None):
     search_open = None
     search_text = ""
     dropdown_scroll = 0  # scroll offset for dropdown list
+
+    # game mode dropdown state
+    game_mode = saved_game_mode if saved_game_mode is not None else "normal"
+    mode_dropdown_open = False
+    GAME_MODES = [
+        ("normal",      "Normal"),
+        ("tournament",  "Tournament"),
+        ("interactive", "Interactive"),
+        ("koth",        "King of Hill"),
+    ]
+    mode_selector_rect = pygame.Rect(0, 0, 0, 0)
 
     while True:
         mx, my = pygame.mouse.get_pos()
@@ -820,17 +923,34 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None):
                         count = random.randint(1, 5)
                         teams.append([random.choice(ROLES) for _ in range(count)])
                     sync_teams()
-                if tourney_btn.clicked(mx, my):
-                    return "tournament", teams, num_teams, arena_idx
-                if interactive_btn.clicked(mx, my):
-                    return "interactive", teams, num_teams, arena_idx
+                # mode dropdown click handling
+                if mode_dropdown_open and hasattr(setup_menu, '_mode_rects'):
+                    clicked_mode = False
+                    for mode_key, drect in setup_menu._mode_rects:
+                        if drect.collidepoint(mx, my):
+                            game_mode = mode_key
+                            mode_dropdown_open = False
+                            clicked_mode = True
+                            break
+                    if clicked_mode:
+                        continue
+                    if not mode_selector_rect.collidepoint(mx, my):
+                        mode_dropdown_open = False
+                        continue
+                if mode_selector_rect.collidepoint(mx, my):
+                    mode_dropdown_open = not mode_dropdown_open
+                    continue
                 if start_btn.clicked(mx, my):
+                    mode_dropdown_open = False
                     sync_teams()
-                    result = []
-                    for i in range(num_teams):
-                        for role in teams[i]:
-                            result.append({"team_id": i, "role": role})
-                    return result, teams, num_teams, arena_idx
+                    if game_mode in ("tournament", "interactive", "koth"):
+                        return game_mode, teams, num_teams, arena_idx, game_mode
+                    else:
+                        result = []
+                        for i in range(num_teams):
+                            for role in teams[i]:
+                                result.append({"team_id": i, "role": role})
+                        return result, teams, num_teams, arena_idx, game_mode
                 if minus_teams_rect.collidepoint(mx, my) and num_teams > 2:
                     num_teams -= 1
                     sync_teams()
@@ -881,13 +1001,9 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None):
         randomize_btn = Button(menu_w // 2 - 195, menu_h - 70, 110, 45, "RANDOMIZE", (90, 60, 120))
         randomize_all_btn = Button(menu_w // 2 + 85, menu_h - 70, 130, 45, "RANDOM ALL", (120, 50, 90))
         start_btn = Button(menu_w // 2 - 80, menu_h - 70, 160, 45, "START FIGHT!")
-        tourney_btn = Button(menu_w // 2 - 130, menu_h - 120, 120, 35, "TOURNAMENT", (60, 90, 130))
-        interactive_btn = Button(menu_w // 2 + 10, menu_h - 120, 120, 35, "INTERACTIVE", (90, 60, 100))
         randomize_btn.update(mx, my)
         randomize_all_btn.update(mx, my)
         start_btn.update(mx, my)
-        tourney_btn.update(mx, my)
-        interactive_btn.update(mx, my)
 
         screen.fill((20, 20, 30))
         t = title_font.render("Ball Fights - Setup", True, (255, 255, 255))
@@ -976,8 +1092,48 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None):
         randomize_btn.draw(screen)
         randomize_all_btn.draw(screen)
         start_btn.draw(screen)
-        tourney_btn.draw(screen)
-        interactive_btn.draw(screen)
+
+        # mode selector dropdown
+        mode_label_text = dict(GAME_MODES).get(game_mode, "Normal")
+        ms_w, ms_h = 180, 30
+        ms_x = menu_w // 2 - ms_w // 2
+        ms_y = menu_h - 125
+        mode_selector_rect = pygame.Rect(ms_x, ms_y, ms_w, ms_h)
+        ms_bg = (80, 80, 110) if mode_dropdown_open else (60, 60, 80)
+        if mode_selector_rect.collidepoint(mx, my):
+            ms_bg = tuple(min(255, v + 20) for v in ms_bg)
+        pygame.draw.rect(screen, ms_bg, mode_selector_rect, border_radius=5)
+        pygame.draw.rect(screen, (140, 140, 160), mode_selector_rect, 2, border_radius=5)
+        mode_txt = font.render(f"Mode: {mode_label_text}", True, (255, 255, 255))
+        screen.blit(mode_txt, (mode_selector_rect.centerx - mode_txt.get_width() // 2,
+                               mode_selector_rect.centery - mode_txt.get_height() // 2))
+        # dropdown arrow
+        tri_x = mode_selector_rect.right - 18
+        tri_y = mode_selector_rect.centery
+        if mode_dropdown_open:
+            pygame.draw.polygon(screen, (200, 200, 220), [
+                (tri_x, tri_y + 3), (tri_x + 8, tri_y + 3), (tri_x + 4, tri_y - 4)])
+        else:
+            pygame.draw.polygon(screen, (200, 200, 220), [
+                (tri_x, tri_y - 3), (tri_x + 8, tri_y - 3), (tri_x + 4, tri_y + 4)])
+
+        # draw mode dropdown options (upward to avoid overlapping buttons)
+        setup_menu._mode_rects = []
+        if mode_dropdown_open:
+            dd_y = mode_selector_rect.top - 2
+            for mode_key, mode_display in reversed(GAME_MODES):
+                opt_rect = pygame.Rect(ms_x, dd_y - 26, ms_w, 26)
+                hovered = opt_rect.collidepoint(mx, my)
+                bg = (80, 80, 110) if hovered else (50, 50, 70)
+                if mode_key == game_mode:
+                    bg = (70, 100, 130)
+                pygame.draw.rect(screen, bg, opt_rect)
+                pygame.draw.rect(screen, (120, 120, 140), opt_rect, 1)
+                opt_label = font.render(mode_display, True, (255, 255, 255))
+                screen.blit(opt_label, (opt_rect.x + 10,
+                                        opt_rect.centery - opt_label.get_height() // 2))
+                setup_menu._mode_rects.append((mode_key, opt_rect))
+                dd_y -= 26
 
         # draw search dropdown on top of everything
         setup_menu._dropdown_rects = []
@@ -1089,6 +1245,11 @@ class Ball:
         self.charge_windup = 0      # frames left in windup
         self.charge_dx = 0.0
         self.charge_dy = 0.0
+        # hammer
+        self.hammer_angle = random.uniform(0, 2 * math.pi)
+        # fencer
+        self.fence_cooldown = random.randint(30, 90)
+        self.fence_post1 = None     # (x, y) of first fence post, None = not placed
         # mimic
         self.mimic_timer = 0        # frames until next copy allowed
         self.mimic_original = (role == "mimic")  # is this a mimic?
@@ -1099,12 +1260,20 @@ class Ball:
         self.trap_bounces = 0       # remaining damaging bounces
         self.carried_by_spear = False  # being dragged by a spear
         self.trapped_in = None          # reference to trap cage
+        self.conqueror_spawn = False    # spawned by conqueror — kills also trigger summon
+        # position & defend assignments (interactive mode)
+        self.assigned_x = None          # hold-position X (None = free roam)
+        self.assigned_y = None          # hold-position Y
+        self.defend_ball = None         # Ball reference to defend/follow
+        self.position_leash = 150.0     # how far to chase before returning to position
         # boss fields
         self.is_boss = False
         self.boss_abilities = set()     # extra abilities beyond base role
         self.boss_summon_count = 0      # how many copies to summon per kill
         self.boss_self_heal = False     # heals itself instead of others
         self.boss_cooldown_overrides = {}  # e.g. {"sniper_cooldown": 90}
+        # KOTH mode
+        self.koth_hill_center = None       # (x, y) tuple when in KOTH mode
 
     def has_ability(self, role_name):
         """Check if this ball has a given role's ability (base role or boss extra)."""
@@ -1118,7 +1287,7 @@ class Ball:
         missing = max(0, 100 - self.hp)
         return 1.0 + missing / 66.0
 
-    MELEE_ROLES = {"zombie", "swordsman", "berserker", "shield", "chainsaw", "vampire", "tank", "charger"}
+    MELEE_ROLES = {"zombie", "swordsman", "berserker", "shield", "chainsaw", "vampire", "tank", "charger", "conqueror", "hammer"}
     RANGED_ROLES = {"sniper", "archer", "wizard", "ice_mage", "spearman", "bomber", "trapper", "fortifier"}
     PRIORITY_ROLES = {"healer", "shield"}  # high-value targets for ninja
 
@@ -1144,21 +1313,64 @@ class Ball:
         if not enemies:
             return None
 
+        # KOTH mode: only target enemies near the hill or directly threatening us
+        if self.koth_hill_center is not None:
+            hx, hy = self.koth_hill_center
+            hill_enemies = []
+            for e in enemies:
+                d_to_hill = dist(e.x, e.y, hx, hy)
+                d_to_self = dist(self.x, self.y, e.x, e.y)
+                if d_to_hill <= KOTH_HILL_RADIUS * 1.5 or d_to_self <= BALL_RADIUS * 3:
+                    hill_enemies.append(e)
+            if hill_enemies:
+                return min(hill_enemies, key=lambda b: dist(self.x, self.y, b.x, b.y))
+            return None
+
+        # defend assignment: prioritize enemies threatening the defended ball
+        if self.defend_ball is not None and self.defend_ball.alive:
+            db = self.defend_ball
+            nearby = [e for e in enemies if dist(db.x, db.y, e.x, e.y) <= self.position_leash * 1.5]
+            if nearby:
+                return min(nearby, key=lambda b: dist(db.x, db.y, b.x, b.y))
+            # no enemies near defended ball — pick nearest to self
+            return min(enemies, key=lambda b: dist(self.x, self.y, b.x, b.y))
+
+        # position assignment: prioritize enemies near assigned position
+        if self.assigned_x is not None and self.assigned_y is not None:
+            ax, ay = self.assigned_x, self.assigned_y
+            nearby = [e for e in enemies if dist(ax, ay, e.x, e.y) <= self.position_leash * 1.5]
+            if nearby:
+                return min(nearby, key=lambda b: dist(ax, ay, b.x, b.y))
+
         if self.role == "zombie":
             # brainless — just go for nearest, no strategy
             return min(enemies, key=lambda b: dist(self.x, self.y, b.x, b.y))
+
+        if self.role == "conqueror":
+            # hunt the weakest enemy to secure kills and spawn copies
+            return min(enemies, key=lambda b: b.hp)
 
         # ignore minions when their summoner is alive — go for the summoner instead
         non_minions = [b for b in enemies if not b.is_minion]
         if non_minions:
             enemies = non_minions
 
+        # leave low HP enemies for conqueror to finish off
+        if self.role != "conqueror" and not self.conqueror_spawn:
+            has_conqueror = any(a.alive and a.team_id == self.team_id
+                               and (a.role == "conqueror" or a.conqueror_spawn)
+                               for a in all_balls if a is not self)
+            if has_conqueror:
+                not_low = [e for e in enemies if e.hp > 15]
+                if not_low:
+                    enemies = not_low
+
         # gang up on the leading team (all roles except zombie)
         enemies = self._focus_leader(enemies)
 
         # tank targeting rules:
         # - melee units avoid tanks if allies have ranged units to deal with them
-        if self.role in self.MELEE_ROLES and self.role not in ("zombie", "tank"):
+        if self.role in self.MELEE_ROLES and self.role not in ("zombie", "tank", "conqueror"):
             has_ranged_ally = any(b.alive and b.team_id == self.team_id and b.role in self.RANGED_ROLES
                                  for b in all_balls if b is not self)
             if has_ranged_ally:
@@ -1200,7 +1412,7 @@ class Ball:
                 return min(tanks, key=lambda b: dist(self.x, self.y, b.x, b.y))
             return min(enemies, key=lambda b: dist(self.x, self.y, b.x, b.y))
 
-        if self.role in self.MELEE_ROLES and self.role != "zombie":
+        if self.role in self.MELEE_ROLES and self.role not in ("zombie", "conqueror"):
             # melee fighters target other melee first
             melee = [b for b in enemies if b.role in self.MELEE_ROLES]
             if melee:
@@ -1269,7 +1481,94 @@ class Ball:
         return min(enemies, key=lambda b: dist(self.x, self.y, b.x, b.y))
 
     def seek(self, target, all_balls=None):
-        if self.bounce_timer > 0 or self.pinned_timer > 0 or self.carried_by_spear or self.trapped_in is not None or target is None:
+        if self.bounce_timer > 0 or self.pinned_timer > 0 or self.carried_by_spear or self.trapped_in is not None:
+            return
+
+        # defend assignment: follow the defended ball when no target in range
+        if self.defend_ball is not None and self.defend_ball.alive:
+            db = self.defend_ball
+            d_to_ward = dist(self.x, self.y, db.x, db.y)
+            # if we have a target, check if it's too far from our ward
+            if target is not None:
+                d_target = dist(self.x, self.y, target.x, target.y)
+                if d_target > self.position_leash * 1.5 and d_to_ward > self.position_leash * 0.5:
+                    # target too far, return to ward
+                    target = None
+            if target is None:
+                # go back to defended ball
+                if d_to_ward > BALL_RADIUS * 3:
+                    ddx = db.x - self.x
+                    ddy = db.y - self.y
+                    dd = max(d_to_ward, 0.01)
+                    self.vx = (ddx / dd) * self.speed
+                    self.vy = (ddy / dd) * self.speed
+                else:
+                    self.vx *= 0.5
+                    self.vy *= 0.5
+                return
+
+        # position assignment: return to post when no nearby target
+        if self.assigned_x is not None and self.assigned_y is not None:
+            ax, ay = self.assigned_x, self.assigned_y
+            d_to_post = dist(self.x, self.y, ax, ay)
+            if target is not None:
+                d_target = dist(self.x, self.y, target.x, target.y)
+                if d_target > self.position_leash and d_to_post > self.position_leash * 0.3:
+                    target = None
+            if target is None:
+                if d_to_post > BALL_RADIUS * 2:
+                    ddx = ax - self.x
+                    ddy = ay - self.y
+                    dd = max(d_to_post, 0.01)
+                    self.vx = (ddx / dd) * self.speed * 0.7
+                    self.vy = (ddy / dd) * self.speed * 0.7
+                else:
+                    self.vx *= 0.3
+                    self.vy *= 0.3
+                return
+
+        # KOTH: hill-focused movement
+        if self.koth_hill_center is not None:
+            hx, hy = self.koth_hill_center
+            d_hill = dist(self.x, self.y, hx, hy)
+
+            if target is None:
+                # No target: move toward hill, decelerate smoothly near center
+                if d_hill > KOTH_HILL_RADIUS * 0.3:
+                    ddx = hx - self.x
+                    ddy = hy - self.y
+                    dd = max(d_hill, 0.01)
+                    approach_speed = self.speed
+                    if d_hill < KOTH_HILL_RADIUS * 0.7:
+                        approach_speed *= (d_hill / (KOTH_HILL_RADIUS * 0.7))
+                        approach_speed = max(approach_speed, 0.3)
+                    self.vx = (ddx / dd) * approach_speed
+                    self.vy = (ddy / dd) * approach_speed
+                else:
+                    self.vx *= 0.2
+                    self.vy *= 0.2
+                return
+
+            d_target = dist(self.x, self.y, target.x, target.y)
+            d_target_to_hill = dist(target.x, target.y, hx, hy)
+
+            # Not on the hill yet — always prioritize getting there
+            if d_hill > KOTH_HILL_RADIUS * 0.8:
+                ddx = hx - self.x
+                ddy = hy - self.y
+                dd = max(d_hill, 0.01)
+                self.vx = (ddx / dd) * self.speed
+                self.vy = (ddy / dd) * self.speed
+                return
+
+            # On the hill but target is far from hill — hold position
+            if d_target_to_hill > KOTH_HILL_RADIUS * 1.5:
+                self.vx *= 0.3
+                self.vy *= 0.3
+                return
+            # else: target is near the hill, fall through to normal seek
+
+        if target is None:
             return
 
         dx = target.x - self.x
@@ -1692,6 +1991,43 @@ class Ball:
                         self.vx = nx * self.speed
                         self.vy = ny * self.speed
 
+        elif self.role == "conqueror":
+            # charge straight at weakest enemy to secure kills
+            self.vx = nx * self.speed
+            self.vy = ny * self.speed
+
+        elif self.role == "hammer":
+            # get close enough for hammer to reach, then strafe
+            ideal_dist = self.radius + HAMMER_LENGTH * 0.8
+            if d < ideal_dist - 10:
+                self.vx = -nx * self.speed
+                self.vy = -ny * self.speed
+            elif d < ideal_dist + 30:
+                if random.random() < 0.008:
+                    self.strafe_dir *= -1
+                sx = -ny * self.strafe_dir
+                sy = nx * self.strafe_dir
+                self.vx = sx * self.speed
+                self.vy = sy * self.speed
+            else:
+                self.vx = nx * self.speed
+                self.vy = ny * self.speed
+
+        elif self.role == "fencer":
+            # stay at medium range, place fences between self and enemies
+            ideal = BALL_RADIUS * 5
+            if d < ideal - 20:
+                self.vx = -nx * self.speed
+                self.vy = -ny * self.speed
+            elif d < ideal + 30:
+                if random.random() < 0.01:
+                    self.strafe_dir *= -1
+                self.vx = -ny * self.strafe_dir * self.speed
+                self.vy = nx * self.strafe_dir * self.speed
+            else:
+                self.vx = nx * self.speed
+                self.vy = ny * self.speed
+
         elif self.role == "mimic":
             # charge straight at nearest enemy to copy their role
             self.vx = nx * self.speed
@@ -1899,10 +2235,14 @@ class Ball:
                 self.invis_timer = NINJA_INVIS_DURATION
         if self.role == "swordsman":
             self.sword_angle += SWORD_SPIN_SPEED
+        if self.role == "hammer":
+            self.hammer_angle += HAMMER_SPIN_SPEED
         if self.role == "chainsaw":
             self.chainsaw_angle += CHAINSAW_SPIN_SPEED
         if self.wall_cooldown > 0:
             self.wall_cooldown -= 1
+        if self.fence_cooldown > 0:
+            self.fence_cooldown -= 1
 
     def take_damage(self, amount):
         """Apply damage with armor reduction for tank or boss with tank ability."""
@@ -1928,6 +2268,26 @@ class Ball:
     def chainsaw_tip(self):
         return (self.x + math.cos(self.chainsaw_angle) * (self.radius + CHAINSAW_LENGTH),
                 self.y + math.sin(self.chainsaw_angle) * (self.radius + CHAINSAW_LENGTH))
+
+    def hammer_tip(self):
+        return (self.x + math.cos(self.hammer_angle) * (self.radius + HAMMER_LENGTH),
+                self.y + math.sin(self.hammer_angle) * (self.radius + HAMMER_LENGTH))
+
+    def try_place_fence(self, target, fences):
+        """Fencer places fence posts. First call sets post 1, second creates the fence."""
+        if self.role != "fencer" or self.fence_cooldown > 0 or target is None:
+            return
+        if self.fence_post1 is None:
+            # place first post at current position
+            self.fence_post1 = (self.x, self.y)
+            self.fence_cooldown = FENCE_COOLDOWN
+        else:
+            # place second post and create fence
+            x1, y1 = self.fence_post1
+            fence = Fence(x1, y1, self.x, self.y, self.team_id, self.color)
+            fences.append(fence)
+            self.fence_post1 = None
+            self.fence_cooldown = FENCE_COOLDOWN
 
     def try_place_wall(self, target, walls, all_balls):
         if not self.has_ability("fortifier") or self.wall_cooldown > 0 or target is None:
@@ -2202,6 +2562,15 @@ class Ball:
 
         if self.role == "charger":
             self._draw_charger(surface)
+
+        if self.role == "conqueror":
+            self._draw_conqueror(surface)
+
+        if self.role == "hammer":
+            self._draw_hammer(surface)
+
+        if self.role == "fencer":
+            self._draw_fencer(surface)
 
         if self.role == "mimic" and not self.mimic_display_role:
             self._draw_mimic(surface)
@@ -2683,6 +3052,66 @@ class Ball:
                 c = 200 - i * 60
                 pygame.draw.circle(surface, (c, c // 2, 0), (trail_x, trail_y), r - i * 3, 1)
 
+    def _draw_conqueror(self, surface):
+        cx, cy = int(self.x), int(self.y)
+        r = self.radius
+        # golden crown with 3 points
+        crown_y = cy - r - 4
+        hw = r * 0.7
+        pts = [
+            (cx - hw, crown_y + 6),
+            (cx - hw, crown_y),
+            (cx - hw * 0.4, crown_y + 4),
+            (cx, crown_y - 4),
+            (cx + hw * 0.4, crown_y + 4),
+            (cx + hw, crown_y),
+            (cx + hw, crown_y + 6),
+        ]
+        pygame.draw.polygon(surface, (255, 200, 50), [(int(x), int(y)) for x, y in pts])
+        pygame.draw.polygon(surface, (200, 150, 0), [(int(x), int(y)) for x, y in pts], 1)
+        # zombie-like arms (same fight style)
+        self._draw_zombie_arms(surface)
+
+    def _draw_hammer(self, surface):
+        angle = self.hammer_angle
+        cos_a, sin_a = math.cos(angle), math.sin(angle)
+        perp_x, perp_y = -sin_a, cos_a
+        # handle from ball edge
+        bx = self.x + cos_a * self.radius
+        by = self.y + sin_a * self.radius
+        handle_len = HAMMER_LENGTH - HAMMER_HEAD_SIZE
+        hx = bx + cos_a * handle_len
+        hy = by + sin_a * handle_len
+        # wooden handle
+        pygame.draw.line(surface, (139, 90, 43), (int(bx), int(by)), (int(hx), int(hy)), 4)
+        # hammer head (rectangle at tip)
+        head_w = HAMMER_HEAD_SIZE
+        head_h = 6
+        pts = [
+            (hx - perp_x * head_w + cos_a * head_h, hy - perp_y * head_w + sin_a * head_h),
+            (hx + perp_x * head_w + cos_a * head_h, hy + perp_y * head_w + sin_a * head_h),
+            (hx + perp_x * head_w - cos_a * head_h * 0.3, hy + perp_y * head_w - sin_a * head_h * 0.3),
+            (hx - perp_x * head_w - cos_a * head_h * 0.3, hy - perp_y * head_w - sin_a * head_h * 0.3),
+        ]
+        pygame.draw.polygon(surface, (120, 120, 140), [(int(x), int(y)) for x, y in pts])
+        pygame.draw.polygon(surface, (180, 180, 200), [(int(x), int(y)) for x, y in pts], 1)
+
+    def _draw_fencer(self, surface):
+        cx, cy = int(self.x), int(self.y)
+        r = self.radius
+        # fence post symbol on the ball
+        pygame.draw.line(surface, (180, 140, 80), (cx - 3, cy - r // 2), (cx - 3, cy + r // 2), 2)
+        pygame.draw.line(surface, (180, 140, 80), (cx + 3, cy - r // 2), (cx + 3, cy + r // 2), 2)
+        pygame.draw.line(surface, (180, 140, 80), (cx - 5, cy - 2), (cx + 5, cy - 2), 2)
+        pygame.draw.line(surface, (180, 140, 80), (cx - 5, cy + 2), (cx + 5, cy + 2), 2)
+        # show pending fence post
+        if self.fence_post1 is not None:
+            px, py = int(self.fence_post1[0]), int(self.fence_post1[1])
+            pygame.draw.circle(surface, (180, 140, 80), (px, py), 5)
+            pygame.draw.circle(surface, (255, 200, 100), (px, py), 7, 1)
+            # dashed line from post to current position
+            pygame.draw.line(surface, (180, 140, 80, 128), (px, py), (cx, cy), 1)
+
     def _draw_mimic(self, surface):
         cx, cy = int(self.x), int(self.y)
         r = self.radius
@@ -2782,6 +3211,7 @@ def game(team_configs, arena_idx=0):
     orbs = []
     ice_bolts = []
     walls = []
+    fences = []
     winner_team = None
     speed_options = [1, 2, 4, 10]
     speed_index = 0
@@ -2884,6 +3314,16 @@ def game(team_configs, arena_idx=0):
                 b.try_cast_orb(target, orbs)
                 b.try_fire_ice_bolt(target, ice_bolts)
                 b.try_place_wall(target, walls, alive_balls)
+                b.try_place_fence(target, fences)
+
+            # fence update & damage
+            for f in fences:
+                if f.alive:
+                    f.update()
+                    for b in alive_balls:
+                        if b.alive:
+                            f.check_damage(b)
+            fences = [f for f in fences if f.alive]
 
             # summoner spawns minions
             for b in alive_balls:
@@ -3138,7 +3578,7 @@ def game(team_configs, arena_idx=0):
                         continue
 
                     if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
-                        if a.role == "zombie" and a.hit_cooldown == 0:
+                        if a.role in ("zombie", "conqueror") and a.hit_cooldown == 0:
                             blocked = False
                             if b.role == "shield":
                                 angle = math.atan2(a.y - b.y, a.x - b.x)
@@ -3146,7 +3586,7 @@ def game(team_configs, arena_idx=0):
                             if not blocked:
                                 b.take_damage(ZOMBIE_DAMAGE)
                             a.hit_cooldown = 5
-                        if b.role == "zombie" and b.hit_cooldown == 0:
+                        if b.role in ("zombie", "conqueror") and b.hit_cooldown == 0:
                             blocked = False
                             if a.role == "shield":
                                 angle = math.atan2(b.y - a.y, b.x - a.x)
@@ -3337,6 +3777,29 @@ def game(team_configs, arena_idx=0):
                         other.apply_knockback(ddx / dd, ddy / dd, 10.0)
                         break
 
+            # hammer hits — only the tip does damage, huge knockback
+            for b in alive_balls:
+                if b.role != "hammer" or b.hit_cooldown > 0:
+                    continue
+                tx, ty = b.hammer_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    # only the hammer head hits (check near tip, not full handle)
+                    if dist(other.x, other.y, tx, ty) <= other.radius + HAMMER_HEAD_SIZE:
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                                break
+                        other.take_damage(HAMMER_DAMAGE)
+                        b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, HAMMER_KNOCKBACK)
+                        break
+
             # chainsaw hits — damage on cooldown, no knockback
             for b in alive_balls:
                 if b.role != "chainsaw" or b.hit_cooldown > 0:
@@ -3402,6 +3865,21 @@ def game(team_configs, arena_idx=0):
                 if b.hp <= 0 and b.alive:
                     b.alive = False
                     newly_dead.append(b)
+                    # conqueror summon-on-kill (conqueror or its spawns)
+                    # skip minions and necromancer-raised zombies
+                    if not getattr(b, 'is_minion', False):
+                        for conq in alive_balls:
+                            if (conq.role == "conqueror" or conq.conqueror_spawn) and conq.alive and conq.team_id != b.team_id:
+                                if dist(conq.x, conq.y, b.x, b.y) <= conq.radius + b.radius + 30:
+                                    for _sc in range(2):
+                                        sx = conq.x + random.randint(-40, 40)
+                                        sy = conq.y + random.randint(-40, 40)
+                                        sx = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, sx))
+                                        sy = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, sy))
+                                        spawn = Ball(sx, sy, conq.color, conq.team_id, b.role)
+                                        spawn.conqueror_spawn = True
+                                        balls.append(spawn)
+                                    break
 
             # necromancer raise dead — any death in circle (own team or enemy), except zombies
             for necro in alive_balls:
@@ -3418,6 +3896,7 @@ def game(team_configs, arena_idx=0):
                         corpse.team_id = necro.team_id
                         corpse.color = necro.color
                         corpse.role = "zombie"
+                        corpse.is_minion = True
                         corpse.speed = ZOMBIE_SPEED
                         corpse.hit_cooldown = 0
                         corpse.bounce_timer = 0
@@ -3448,9 +3927,11 @@ def game(team_configs, arena_idx=0):
         screen.fill((20, 20, 30))
         pygame.draw.rect(screen, (80, 80, 80), (0, 0, WIDTH, HEIGHT), 2)
 
-        # draw traps, bombs, walls first (under balls)
+        # draw traps, bombs, walls, fences first (under balls)
         for w in walls:
             w.draw(screen)
+        for f in fences:
+            f.draw(screen)
         for t in traps:
             t.draw(screen)
         for bm in bombs:
@@ -3526,7 +4007,7 @@ def tournament_menu(arena_idx):
         "5 of Each": [[r] * 5 for r in ROLES],
         "Random 8": None,   # generated on click
         "Random 16": None,
-        "Melee Brawl": [[r] for r in ["zombie", "swordsman", "berserker", "chainsaw", "vampire", "tank", "charger", "shield"]],
+        "Melee Brawl": [[r] for r in ["zombie", "swordsman", "berserker", "chainsaw", "vampire", "tank", "charger", "shield", "conqueror", "hammer"]],
         "Ranged War": [[r] for r in ["sniper", "archer", "wizard", "ice_mage", "spearman", "bomber", "trapper", "fortifier"]],
     }
 
@@ -3950,7 +4431,7 @@ def run_tournament(bracket, arena_idx, realistic=False):
                 elif ball.team_id == 1 and hp_b and idx_b < len(hp_b):
                     ball.hp = hp_b[idx_b]
                     idx_b += 1
-        spears, traps, bombs, bullets, arrows, orbs, ice_bolts, walls = [], [], [], [], [], [], [], []
+        spears, traps, bombs, bullets, arrows, orbs, ice_bolts, walls, fences = [], [], [], [], [], [], [], [], []
         speed_options = [1, 2, 4, 10]
         speed_index = 0
         paused = False
@@ -4070,6 +4551,16 @@ def run_tournament(bracket, arena_idx, realistic=False):
                     b.try_cast_orb(target, orbs)
                     b.try_fire_ice_bolt(target, ice_bolts)
                     b.try_place_wall(target, walls, alive_balls)
+                    b.try_place_fence(target, fences)
+
+                # fence update & damage
+                for f in fences:
+                    if f.alive:
+                        f.update()
+                        for b in alive_balls:
+                            if b.alive:
+                                f.check_damage(b)
+                fences = [f for f in fences if f.alive]
 
                 # summoner spawns
                 for b in alive_balls:
@@ -4294,7 +4785,7 @@ def run_tournament(bracket, arena_idx, realistic=False):
                             continue
                         if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
                             # all the same collision logic from game()
-                            if a.role == "zombie" and a.hit_cooldown == 0:
+                            if a.role in ("zombie", "conqueror") and a.hit_cooldown == 0:
                                 blocked = False
                                 if b.role == "shield":
                                     sa = math.atan2(a.y - b.y, a.x - b.x)
@@ -4302,7 +4793,7 @@ def run_tournament(bracket, arena_idx, realistic=False):
                                 if not blocked:
                                     b.take_damage(ZOMBIE_DAMAGE)
                                 a.hit_cooldown = 5
-                            if b.role == "zombie" and b.hit_cooldown == 0:
+                            if b.role in ("zombie", "conqueror") and b.hit_cooldown == 0:
                                 blocked = False
                                 if a.role == "shield":
                                     sa = math.atan2(b.y - a.y, b.x - a.x)
@@ -4481,6 +4972,28 @@ def run_tournament(bracket, arena_idx, realistic=False):
                             other.apply_knockback(ddx / dd, ddy / dd, 10.0)
                             break
 
+                # hammer hits
+                for b in alive_balls:
+                    if b.role != "hammer" or b.hit_cooldown > 0:
+                        continue
+                    tx, ty = b.hammer_tip()
+                    for other in alive_balls:
+                        if other is b or not other.alive or other.team_id == b.team_id:
+                            continue
+                        if dist(other.x, other.y, tx, ty) <= other.radius + HAMMER_HEAD_SIZE:
+                            if other.role == "shield":
+                                sa = math.atan2(ty - other.y, tx - other.x)
+                                if other.is_angle_in_shield(sa):
+                                    b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                                    break
+                            other.take_damage(HAMMER_DAMAGE)
+                            b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                            ddx = other.x - b.x
+                            ddy = other.y - b.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            other.apply_knockback(ddx / dd, ddy / dd, HAMMER_KNOCKBACK)
+                            break
+
                 for b in alive_balls:
                     if b.role != "chainsaw" or b.hit_cooldown > 0:
                         continue
@@ -4538,6 +5051,19 @@ def run_tournament(bracket, arena_idx, realistic=False):
                     if b.hp <= 0 and b.alive:
                         b.alive = False
                         newly_dead.append(b)
+                        # conqueror summon-on-kill — skip minions and necro zombies
+                        if not getattr(b, 'is_minion', False):
+                            for conq in alive_balls:
+                                if conq.role == "conqueror" and conq.alive and conq.team_id != b.team_id:
+                                    if dist(conq.x, conq.y, b.x, b.y) <= conq.radius + b.radius + 30:
+                                        for _sc in range(2):
+                                            sx = conq.x + random.randint(-40, 40)
+                                            sy = conq.y + random.randint(-40, 40)
+                                            sx = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, sx))
+                                            sy = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, sy))
+                                            spawn = Ball(sx, sy, conq.color, conq.team_id, b.role)
+                                            balls.append(spawn)
+                                        break
                 for necro in alive_balls:
                     if necro.role != "necromancer" or not necro.alive or necro.necro_cooldown > 0:
                         continue
@@ -4551,6 +5077,7 @@ def run_tournament(bracket, arena_idx, realistic=False):
                             corpse.team_id = necro.team_id
                             corpse.color = necro.color
                             corpse.role = "zombie"
+                            corpse.is_minion = True
                             corpse.speed = ZOMBIE_SPEED
                             corpse.hit_cooldown = 0
                             corpse.bounce_timer = 0
@@ -4580,6 +5107,8 @@ def run_tournament(bracket, arena_idx, realistic=False):
             pygame.draw.rect(screen_g, (80, 80, 80), (0, 0, WIDTH, HEIGHT), 2)
             for w in walls:
                 w.draw(screen_g)
+            for f in fences:
+                f.draw(screen_g)
             for t_obj in traps:
                 t_obj.draw(screen_g)
             for bm in bombs:
@@ -4710,6 +5239,8 @@ def interactive_mode():
         "ninja": 75, "assassin": 75, "shield": 75, "wizard": 75, "summoner": 75,
         "sniper": 80, "mimic": 80, "mirror": 80,
         "healer": 100, "necromancer": 75, "tank": 100,
+        "conqueror": 150,
+        "hammer": 50, "fencer": 65,
     }
     KILL_BOUNTY = {
         "zombie": 10, "swordsman": 15, "spearman": 15, "trapper": 15,
@@ -4718,6 +5249,8 @@ def interactive_mode():
         "ninja": 30, "assassin": 30, "shield": 30, "wizard": 30, "summoner": 30,
         "sniper": 35, "mimic": 35, "mirror": 35,
         "healer": 40, "necromancer": 30, "tank": 40,
+        "conqueror": 50,
+        "hammer": 20, "fencer": 25,
     }
     HEAL_POTION_COST = 30
     SHOP_ROLES = [
@@ -4727,6 +5260,7 @@ def interactive_mode():
         "ninja", "assassin", "shield", "wizard", "summoner",
         "sniper", "mimic", "mirror",
         "healer", "necromancer", "tank",
+        "conqueror", "hammer", "fencer",
     ]
 
     def get_arena_size(total):
@@ -5070,11 +5604,23 @@ def interactive_mode():
         selected_ability = None  # (ball_index, ability_type)
         pulse = 0.0
 
+        # position assignment state
+        position_mode = False
+        position_set = set()  # indices of balls assigned to hold position
+
+        # defend assignment state
+        defend_mode = False
+        defend_from = None  # index of defender ball picked first
+        defend_map = {}     # defender_index -> target_index
+
+        # wall rotation angle (for placing fortifier walls)
+        wall_angle = 0.0  # radians
+
         # instructions
         SETUP_INSTRUCTIONS = [
-            "Left-click & drag units to position them.",
-            "Right-click a fortifier/trapper/bomber to select ability,",
-            "then left-click arena to place wall/trap/bomb.",
+            "Drag to rearrange. P: assign positions.",
+            "R-click fortifier/trapper/bomber for ability.",
+            "D: assign defenders. < > rotate walls.",
             "Press ENTER or click START when ready.",
         ]
 
@@ -5091,26 +5637,60 @@ def interactive_mode():
 
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
-                        # start battle
+                        # start battle — include position & defend data
                         result_team = []
                         for b in placed_balls:
                             result_team.append({"role": b.role, "hp": b.hp, "x": b.x, "y": b.y})
-                        return result_team, setup_walls, setup_traps, setup_bombs, aw, ah
+                        return result_team, setup_walls, setup_traps, setup_bombs, aw, ah, defend_map, position_set
                     if event.key == pygame.K_ESCAPE:
                         selected_ability = None
+                        defend_mode = False
+                        defend_from = None
+                    if event.key == pygame.K_p:
+                        position_mode = not position_mode
+                        if position_mode:
+                            defend_mode = False
+                            defend_from = None
+                            selected_ability = None
+                    if event.key == pygame.K_d:
+                        defend_mode = not defend_mode
+                        defend_from = None
+                        if defend_mode:
+                            position_mode = False
+                            selected_ability = None
+                    # rotate wall placement angle with arrow keys
+                    if event.key == pygame.K_LEFT:
+                        wall_angle -= math.pi / 12  # 15 degrees
+                    if event.key == pygame.K_RIGHT:
+                        wall_angle += math.pi / 12
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-                    # right click: select ability from a unit
-                    selected_ability = None
-                    for i, b in enumerate(placed_balls):
-                        if dist(mx, my, b.x, b.y) <= b.radius + 4:
-                            if i in wall_limits and wall_limits[i] > 0:
-                                selected_ability = (i, "wall")
-                            elif i in trap_limits and trap_limits[i] > 0:
-                                selected_ability = (i, "trap")
-                            elif i in bomb_limits and bomb_limits[i] > 0:
-                                selected_ability = (i, "bomb")
-                            break
+                    if position_mode:
+                        # right-click in position mode: remove position assignment
+                        for i, b in enumerate(placed_balls):
+                            if dist(mx, my, b.x, b.y) <= b.radius + 4:
+                                position_set.discard(i)
+                                break
+                    elif defend_mode:
+                        # right-click in defend mode: remove assignment
+                        for i, b in enumerate(placed_balls):
+                            if dist(mx, my, b.x, b.y) <= b.radius + 4:
+                                if i in defend_map:
+                                    del defend_map[i]
+                                break
+                        defend_from = None
+                    else:
+                        # right click: select ability from a unit
+                        selected_ability = None
+                        for i, b in enumerate(placed_balls):
+                            if dist(mx, my, b.x, b.y) <= b.radius + 4:
+                                if i in wall_limits and wall_limits[i] > 0:
+                                    selected_ability = (i, "wall")
+                                elif i in trap_limits and trap_limits[i] > 0:
+                                    selected_ability = (i, "trap")
+                                elif i in bomb_limits and bomb_limits[i] > 0:
+                                    selected_ability = (i, "bomb")
+                                break
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if mx >= aw:
@@ -5119,13 +5699,29 @@ def interactive_mode():
                             result_team = []
                             for b in placed_balls:
                                 result_team.append({"role": b.role, "hp": b.hp, "x": b.x, "y": b.y})
-                            return result_team, setup_walls, setup_traps, setup_bombs, aw, ah
+                            return result_team, setup_walls, setup_traps, setup_bombs, aw, ah, defend_map, position_set
+                    elif position_mode:
+                        # position mode: click & drag to assign hold position
+                        for i, b in enumerate(placed_balls):
+                            if dist(mx, my, b.x, b.y) <= b.radius + 4:
+                                dragging = i
+                                position_set.add(i)
+                                break
+                    elif defend_mode:
+                        # defend assignment: pick defender, then target
+                        for i, b in enumerate(placed_balls):
+                            if dist(mx, my, b.x, b.y) <= b.radius + 4:
+                                if defend_from is None:
+                                    defend_from = i
+                                elif i != defend_from:
+                                    defend_map[defend_from] = i
+                                    defend_from = None
+                                break
                     elif selected_ability is not None:
                         # place ability
                         si, atype = selected_ability
                         if atype == "wall" and wall_limits.get(si, 0) > 0:
-                            angle = random.uniform(0, math.pi)
-                            w = FortWall(mx, my, angle, 0, color, explosive=False)
+                            w = FortWall(mx, my, wall_angle, 0, color, explosive=False)
                             setup_walls.append(w)
                             wall_limits[si] -= 1
                             if wall_limits[si] <= 0:
@@ -5179,6 +5775,47 @@ def interactive_mode():
             for bm in setup_bombs:
                 bm.draw(screen)
 
+            # draw position markers for balls assigned to hold post
+            for i in position_set:
+                if 0 <= i < len(placed_balls):
+                    b = placed_balls[i]
+                    cx, cy = int(b.x), int(b.y)
+                    c_alpha = int(140 + 60 * math.sin(pulse * 2))
+                    mc = (c_alpha, 200, c_alpha)
+                    pygame.draw.line(screen, mc, (cx - 10, cy), (cx + 10, cy), 2)
+                    pygame.draw.line(screen, mc, (cx, cy - 10), (cx, cy + 10), 2)
+                    pygame.draw.circle(screen, mc, (cx, cy), b.radius + 6, 1)
+                    pl = small_font.render("POST", True, mc)
+                    screen.blit(pl, (cx - pl.get_width() // 2, cy + b.radius + 8))
+
+            # draw defend assignment lines
+            for di, ti in defend_map.items():
+                if 0 <= di < len(placed_balls) and 0 <= ti < len(placed_balls):
+                    db = placed_balls[di]
+                    tb = placed_balls[ti]
+                    # dashed line from defender to target
+                    dx_l = tb.x - db.x
+                    dy_l = tb.y - db.y
+                    length = max(1, math.hypot(dx_l, dy_l))
+                    segments = int(length / 10)
+                    for s in range(0, segments, 2):
+                        t0 = s / segments
+                        t1 = min((s + 1) / segments, 1.0)
+                        x0 = int(db.x + dx_l * t0)
+                        y0 = int(db.y + dy_l * t0)
+                        x1 = int(db.x + dx_l * t1)
+                        y1 = int(db.y + dy_l * t1)
+                        pygame.draw.line(screen, (100, 200, 255), (x0, y0), (x1, y1), 2)
+                    # small shield icon near target
+                    pygame.draw.circle(screen, (100, 200, 255), (int(tb.x), int(tb.y)), tb.radius + 8, 1)
+
+            # draw defend-mode selection highlight
+            if defend_mode and defend_from is not None and 0 <= defend_from < len(placed_balls):
+                fb = placed_balls[defend_from]
+                pygame.draw.circle(screen, (100, 255, 100), (int(fb.x), int(fb.y)), fb.radius + 7, 2)
+                if mx < aw:
+                    pygame.draw.line(screen, (100, 255, 100), (int(fb.x), int(fb.y)), (mx, my), 1)
+
             # draw placed balls
             for i, b in enumerate(placed_balls):
                 b.draw(screen)
@@ -5192,7 +5829,38 @@ def interactive_mode():
             if selected_ability is not None and mx < aw:
                 si, atype = selected_ability
                 if atype == "wall":
-                    pygame.draw.line(screen, (200, 200, 255), (mx - 30, my), (mx + 30, my), 4)
+                    # show rotated wall preview
+                    hw = FORT_WALL_WIDTH / 2
+                    cos_a = math.cos(wall_angle)
+                    sin_a = math.sin(wall_angle)
+                    x1 = int(mx - cos_a * hw)
+                    y1 = int(my - sin_a * hw)
+                    x2 = int(mx + cos_a * hw)
+                    y2 = int(my + sin_a * hw)
+                    pygame.draw.line(screen, (200, 200, 255), (x1, y1), (x2, y2), 4)
+                    # rotation arrows at each end
+                    # left arrow (counterclockwise)
+                    arr_dist = hw + 12
+                    lax = int(mx - cos_a * arr_dist)
+                    lay = int(my - sin_a * arr_dist)
+                    perp_x = -sin_a * 6
+                    perp_y = cos_a * 6
+                    pygame.draw.polygon(screen, (180, 180, 255), [
+                        (lax, lay),
+                        (int(lax + cos_a * 5 + perp_x), int(lay + sin_a * 5 + perp_y)),
+                        (int(lax + cos_a * 5 - perp_x), int(lay + sin_a * 5 - perp_y)),
+                    ])
+                    # right arrow (clockwise)
+                    rax = int(mx + cos_a * arr_dist)
+                    ray = int(my + sin_a * arr_dist)
+                    pygame.draw.polygon(screen, (180, 180, 255), [
+                        (rax, ray),
+                        (int(rax - cos_a * 5 + perp_x), int(ray - sin_a * 5 + perp_y)),
+                        (int(rax - cos_a * 5 - perp_x), int(ray - sin_a * 5 - perp_y)),
+                    ])
+                    # hint text
+                    rot_hint = small_font.render("< > to rotate", True, (180, 180, 255))
+                    screen.blit(rot_hint, (mx - rot_hint.get_width() // 2, my + 14))
                 elif atype == "trap":
                     pygame.draw.circle(screen, (200, 150, 50), (mx, my), TRAP_RADIUS, 2)
                 elif atype == "bomb":
@@ -5247,6 +5915,56 @@ def interactive_mode():
                 screen.blit(hint, (panel_x + 10, ability_y + 5))
                 hint2 = small_font.render("L-click arena / ESC", True, (140, 140, 140))
                 screen.blit(hint2, (panel_x + 10, ability_y + 22))
+                ability_y += 40
+
+            # position mode indicator
+            if position_mode:
+                pm_label = small_font.render("POSITION MODE", True, (140, 255, 140))
+                screen.blit(pm_label, (panel_x + 10, ability_y + 5))
+                pm2 = small_font.render("Drag unit to post", True, (140, 140, 140))
+                screen.blit(pm2, (panel_x + 10, ability_y + 22))
+                pm3 = small_font.render("R-click to unpost", True, (140, 140, 140))
+                screen.blit(pm3, (panel_x + 10, ability_y + 38))
+                ability_y += 55
+
+            # show posted units
+            if position_set:
+                pl = small_font.render("On Post:", True, (140, 200, 140))
+                screen.blit(pl, (panel_x + 10, ability_y + 5))
+                py_off = ability_y + 22
+                for pi in position_set:
+                    if 0 <= pi < len(placed_balls):
+                        pn = placed_balls[pi].role.capitalize()
+                        pt = small_font.render(f"- {pn}", True, (150, 220, 150))
+                        screen.blit(pt, (panel_x + 10, py_off))
+                        py_off += 16
+                ability_y = py_off
+
+            # defend mode indicator
+            if defend_mode:
+                dm_label = small_font.render("DEFEND MODE", True, (100, 255, 100))
+                screen.blit(dm_label, (panel_x + 10, ability_y + 5))
+                if defend_from is not None:
+                    db = placed_balls[defend_from]
+                    dm2 = small_font.render(f"{db.role.capitalize()} -> ?", True, (100, 200, 100))
+                    screen.blit(dm2, (panel_x + 10, ability_y + 22))
+                else:
+                    dm2 = small_font.render("Click guard unit", True, (140, 140, 140))
+                    screen.blit(dm2, (panel_x + 10, ability_y + 22))
+                ability_y += 40
+
+            # show defend assignments
+            if defend_map:
+                dl = small_font.render("Defenders:", True, (100, 200, 255))
+                screen.blit(dl, (panel_x + 10, ability_y + 5))
+                dy = ability_y + 22
+                for di, ti in defend_map.items():
+                    if 0 <= di < len(placed_balls) and 0 <= ti < len(placed_balls):
+                        dn = placed_balls[di].role[:6].capitalize()
+                        tn = placed_balls[ti].role[:6].capitalize()
+                        dt = small_font.render(f"{dn} -> {tn}", True, (150, 200, 255))
+                        screen.blit(dt, (panel_x + 10, dy))
+                        dy += 16
 
             # instructions
             iy = ah - 140
@@ -5573,7 +6291,7 @@ def interactive_mode():
             clock.tick(60)
 
     # ── battle ──
-    def run_battle(player_team, enemy_roles, directions, pre_walls=None, pre_traps=None, pre_bombs=None, arena_size=None, wave_num=0):
+    def run_battle(player_team, enemy_roles, directions, pre_walls=None, pre_traps=None, pre_bombs=None, arena_size=None, wave_num=0, defend_map=None, position_set=None):
         global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
 
         total = len(player_team) + len(enemy_roles)
@@ -5602,9 +6320,23 @@ def interactive_mode():
             b = Ball(bx, by, color_p, 0, info["role"])
             b.hp = info["hp"]
             b.max_hp = TANK_HP if info["role"] == "tank" else 100
+            # only assign position if player explicitly set it via P mode
+            if position_set and i in position_set:
+                b.assigned_x = bx
+                b.assigned_y = by
             if i == 0:
                 commander = b
             balls.append(b)
+
+        # apply defend assignments (defender -> target ball references)
+        if defend_map:
+            player_balls = [b for b in balls if b.team_id == 0]
+            for di, ti in defend_map.items():
+                if 0 <= di < len(player_balls) and 0 <= ti < len(player_balls):
+                    player_balls[di].defend_ball = player_balls[ti]
+                    # clear position assignment for defenders — they follow their ward
+                    player_balls[di].assigned_x = None
+                    player_balls[di].assigned_y = None
 
         # spawn enemies from directions (streaming from edges)
         color_e = TEAM_COLORS[1]
@@ -5629,7 +6361,7 @@ def interactive_mode():
         walls = list(pre_walls) if pre_walls else []
         traps = list(pre_traps) if pre_traps else []
         bombs = list(pre_bombs) if pre_bombs else []
-        spears, bullets, arrows, orbs, ice_bolts = [], [], [], [], []
+        spears, bullets, arrows, orbs, ice_bolts, fences = [], [], [], [], [], []
         speed_options = [1, 2, 4, 10]
         speed_index = 0
         paused = False
@@ -5702,6 +6434,16 @@ def interactive_mode():
                     b.try_cast_orb(target, orbs)
                     b.try_fire_ice_bolt(target, ice_bolts)
                     b.try_place_wall(target, walls, alive_balls)
+                    b.try_place_fence(target, fences)
+
+                # fence update & damage
+                for f in fences:
+                    if f.alive:
+                        f.update()
+                        for b in alive_balls:
+                            if b.alive:
+                                f.check_damage(b)
+                fences = [f for f in fences if f.alive]
 
                 # summoner spawns
                 for b in alive_balls:
@@ -5933,7 +6675,7 @@ def interactive_mode():
                                 resolve_collision(a, b)
                             continue
                         if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
-                            if a.role == "zombie" and a.hit_cooldown == 0:
+                            if a.role in ("zombie", "conqueror") and a.hit_cooldown == 0:
                                 blocked = False
                                 if b.role == "shield":
                                     sa = math.atan2(a.y - b.y, a.x - b.x)
@@ -5941,7 +6683,7 @@ def interactive_mode():
                                 if not blocked:
                                     b.take_damage(ZOMBIE_DAMAGE)
                                 a.hit_cooldown = 5
-                            if b.role == "zombie" and b.hit_cooldown == 0:
+                            if b.role in ("zombie", "conqueror") and b.hit_cooldown == 0:
                                 blocked = False
                                 if a.role == "shield":
                                     sa = math.atan2(b.y - a.y, b.x - a.x)
@@ -6121,6 +6863,28 @@ def interactive_mode():
                             other.apply_knockback(ddx / dd, ddy / dd, 10.0)
                             break
 
+                # hammer hits
+                for b in alive_balls:
+                    if b.role != "hammer" or b.hit_cooldown > 0:
+                        continue
+                    tx, ty = b.hammer_tip()
+                    for other in alive_balls:
+                        if other is b or not other.alive or other.team_id == b.team_id:
+                            continue
+                        if dist(other.x, other.y, tx, ty) <= other.radius + HAMMER_HEAD_SIZE:
+                            if other.role == "shield":
+                                sa = math.atan2(ty - other.y, tx - other.x)
+                                if other.is_angle_in_shield(sa):
+                                    b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                                    break
+                            other.take_damage(HAMMER_DAMAGE)
+                            b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                            ddx = other.x - b.x
+                            ddy = other.y - b.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            other.apply_knockback(ddx / dd, ddy / dd, HAMMER_KNOCKBACK)
+                            break
+
                 # chainsaw hits
                 for b in alive_balls:
                     if b.role != "chainsaw" or b.hit_cooldown > 0:
@@ -6175,7 +6939,7 @@ def interactive_mode():
                             dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
                             b.apply_knockback(ddx / dd, ddy / dd, 6.0)
 
-                # necromancer resurrection + kill bounty + boss summon-on-kill
+                # necromancer resurrection + kill bounty + boss summon-on-kill + conqueror
                 newly_dead = []
                 for b in balls:
                     if b.hp <= 0 and b.alive:
@@ -6196,6 +6960,20 @@ def interactive_mode():
                                         minion = Ball(sx, sy, boss_b.color, boss_b.team_id, b.role)
                                         minion.is_minion = True
                                         balls.append(minion)
+                        # conqueror summon-on-kill — skip minions and necro zombies
+                        if not getattr(b, 'is_minion', False):
+                            for conq in alive_balls:
+                                if (conq.role == "conqueror" or conq.conqueror_spawn) and conq.alive and conq.team_id != b.team_id:
+                                    if dist(conq.x, conq.y, b.x, b.y) <= conq.radius + b.radius + 30:
+                                        for _sc in range(2):
+                                            sx = conq.x + random.randint(-40, 40)
+                                            sy = conq.y + random.randint(-40, 40)
+                                            sx = max(BALL_RADIUS, min(aw - BALL_RADIUS, sx))
+                                            sy = max(BALL_RADIUS, min(ah - BALL_RADIUS, sy))
+                                            spawn = Ball(sx, sy, conq.color, conq.team_id, b.role)
+                                            spawn.conqueror_spawn = True
+                                            balls.append(spawn)
+                                    break
                 for necro in alive_balls:
                     if necro.role != "necromancer" or not necro.alive or necro.necro_cooldown > 0:
                         continue
@@ -6209,6 +6987,7 @@ def interactive_mode():
                             corpse.team_id = necro.team_id
                             corpse.color = necro.color
                             corpse.role = "zombie"
+                            corpse.is_minion = True
                             corpse.speed = ZOMBIE_SPEED
                             corpse.hit_cooldown = 0
                             corpse.bounce_timer = 0
@@ -6245,6 +7024,8 @@ def interactive_mode():
             pygame.draw.rect(screen, (80, 80, 80), (0, 0, WIDTH, HEIGHT), 2)
             for w in walls:
                 w.draw(screen)
+            for f in fences:
+                f.draw(screen)
             for t_obj in traps:
                 t_obj.draw(screen)
             for bm in bombs:
@@ -6402,14 +7183,14 @@ def interactive_mode():
 
         if not surrendered:
             # setup phase: place units, use abilities, see enemy directions
-            placed_team, setup_w, setup_t, setup_b, aw, ah = setup_phase(
+            placed_team, setup_w, setup_t, setup_b, aw, ah, def_map, pos_set = setup_phase(
                 player_team, enemy_roles, directions, wave)
 
             # battle with pre-placed units and enemy spawning from edges
             survivors, won, earned = run_battle(
                 placed_team, enemy_roles, directions,
                 pre_walls=setup_w, pre_traps=setup_t, pre_bombs=setup_b,
-                arena_size=(aw, ah), wave_num=wave)
+                arena_size=(aw, ah), wave_num=wave, defend_map=def_map, position_set=pos_set)
             gold += earned
 
             if not won or not survivors:
@@ -6447,16 +7228,807 @@ def interactive_mode():
         wave += 1
 
 
+# ── King of the Hill mode ────────────────────────────────────
+
+def king_of_the_hill(team_configs, arena_idx=0):
+    global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
+    total_balls = len(team_configs)
+
+    aw, ah, a_hint = ARENA_SIZES[arena_idx]
+    WIDTH = aw
+    HEIGHT = ah
+
+    if total_balls > 6:
+        BALL_RADIUS = max(12, BASE_BALL_RADIUS - (total_balls - 6) * 2)
+    else:
+        BALL_RADIUS = BASE_BALL_RADIUS
+    SWORD_LENGTH = BALL_RADIUS * 2
+    TRAP_RADIUS = BALL_RADIUS * 4
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+    balls = spawn_balls(team_configs)
+    spears = []
+    traps = []
+    bombs = []
+    bullets = []
+    arrows = []
+    orbs = []
+    ice_bolts = []
+    walls = []
+    fences = []
+    winner_team = None
+    speed_options = [1, 2, 4, 10]
+    speed_index = 0
+    paused = False
+
+    # KOTH-specific state
+    hill_cx = WIDTH // 2
+    hill_cy = HEIGHT // 2
+    hill_center = (hill_cx, hill_cy)
+    team_ids = sorted(set(cfg["team_id"] for cfg in team_configs))
+    scores = {tid: 0 for tid in team_ids}
+    score_timer = 0
+    respawn_queue = []  # list of (ball, respawn_frame, team_id, role, color)
+    frame_count = 0
+    controlling_team = None  # which team currently controls the hill
+
+    # set hill center on all balls so seek() uses it
+    for b in balls:
+        b.koth_hill_center = hill_center
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    king_of_the_hill(team_configs, arena_idx)
+                    return
+                if event.key == pygame.K_m:
+                    return
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                if event.key == pygame.K_1:
+                    speed_index = 0
+                if event.key == pygame.K_2:
+                    speed_index = 1
+                if event.key == pygame.K_3:
+                    speed_index = 2
+                if event.key == pygame.K_4:
+                    speed_index = 3
+
+        game_speed = speed_options[speed_index]
+
+        if winner_team is not None:
+            screen.fill((20, 20, 30))
+            if winner_team == -1:
+                text = big_font.render("Draw!", True, (255, 255, 255))
+            else:
+                color = TEAM_COLORS[winner_team % len(TEAM_COLORS)]
+                text = big_font.render(f"Team {winner_team + 1} Wins!", True, color)
+            sub = font.render(f"Score: {KOTH_WIN_SCORE} points", True, (200, 200, 200))
+            r1 = font.render("R = Rematch  |  M = Menu", True, (180, 180, 180))
+            screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 50))
+            screen.blit(sub, (WIDTH // 2 - sub.get_width() // 2, HEIGHT // 2 + 10))
+            screen.blit(r1, (WIDTH // 2 - r1.get_width() // 2, HEIGHT // 2 + 40))
+            pygame.display.flip()
+            clock.tick(60)
+            continue
+
+        for _tick in range(game_speed):
+            if winner_team is not None or paused:
+                break
+
+            frame_count += 1
+            alive_balls = [b for b in balls if b.alive]
+
+            # AI + movement + abilities
+            for b in alive_balls:
+                target = b.find_target(alive_balls)
+                b.seek(target, alive_balls)
+                b.move()
+                b.try_throw_spear(target, spears)
+                b.try_place_trap(target, traps)
+                b.try_drop_bomb(target, bombs)
+                b.try_heal(alive_balls)
+                b.aim_shield(alive_balls)
+                b.try_fire_bullet(target, bullets)
+                b.try_fire_arrow(target, arrows)
+                b.try_cast_orb(target, orbs)
+                b.try_fire_ice_bolt(target, ice_bolts)
+                b.try_place_wall(target, walls, alive_balls)
+                b.try_place_fence(target, fences)
+
+            # fence update & damage
+            for f in fences:
+                if f.alive:
+                    f.update()
+                    for b in alive_balls:
+                        if b.alive:
+                            f.check_damage(b)
+            fences = [f for f in fences if f.alive]
+
+            # summoner spawns minions
+            for b in alive_balls:
+                if b.role != "summoner" or b.summon_cooldown > 0:
+                    continue
+                b.minions = [m for m in b.minions if m.alive]
+                if len(b.minions) >= SUMMONER_MAX_MINIONS:
+                    continue
+                angle = random.uniform(0, 2 * math.pi)
+                mx = b.x + math.cos(angle) * (b.radius * 2.5)
+                my = b.y + math.sin(angle) * (b.radius * 2.5)
+                mx = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, mx))
+                my = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, my))
+                minion = Ball(mx, my, b.color, b.team_id, "zombie")
+                minion.hp = SUMMONER_MINION_HP
+                minion.max_hp = SUMMONER_MINION_HP
+                minion.radius = max(8, int(BALL_RADIUS * SUMMONER_MINION_RADIUS_SCALE))
+                minion.is_minion = True
+                minion.koth_hill_center = hill_center
+                balls.append(minion)
+                b.minions.append(minion)
+                b.summon_cooldown = SUMMONER_COOLDOWN
+
+            # move spears
+            for s in spears:
+                if s.alive:
+                    s.move()
+
+            # spear hit detection
+            for s in spears:
+                if not s.alive or s.carried_ball is not None:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == s.team_id or b.carried_by_spear:
+                        continue
+                    if dist(s.x, s.y, b.x, b.y) <= b.radius + 5:
+                        if b.role == "mirror":
+                            s.dx = -s.dx
+                            s.dy = -s.dy
+                            s.angle = math.atan2(s.dy, s.dx)
+                            s.team_id = b.team_id
+                            s.x += s.dx * 2
+                            s.y += s.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(s.y - b.y, s.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                s.alive = False
+                                break
+                        b.take_damage(SPEAR_DAMAGE)
+                        if b.trapped_in is not None:
+                            b.trapped_in.captured_ball = None
+                            b.trapped_in.alive = False
+                            b.trapped_in = None
+                        b.carried_by_spear = True
+                        b.pinned_timer = 0
+                        b.vx = 0
+                        b.vy = 0
+                        s.carried_ball = b
+                        break
+
+            # trap trigger detection + update
+            for t in traps:
+                if not t.alive:
+                    continue
+                if t.captured_ball is not None:
+                    t.update()
+                    continue
+                for b in alive_balls:
+                    if b.team_id == t.team_id or b.trapped_in is not None or b.carried_by_spear or b.pinned_timer > 0:
+                        continue
+                    if dist(t.x, t.y, b.x, b.y) <= t.radius:
+                        t.captured_ball = b
+                        b.trapped_in = t
+                        angle = random.uniform(0, 2 * math.pi)
+                        b.vx = math.cos(angle) * 4.0
+                        b.vy = math.sin(angle) * 4.0
+                        b.bounce_timer = 0
+                        break
+
+            # move bullets
+            for bl in bullets:
+                if bl.alive:
+                    bl.move()
+
+            # bullet hit detection
+            for bl in bullets:
+                if not bl.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == bl.team_id:
+                        continue
+                    if dist(bl.x, bl.y, b.x, b.y) <= b.radius + 3:
+                        if b.role == "mirror":
+                            bl.dx = -bl.dx
+                            bl.dy = -bl.dy
+                            bl.angle = math.atan2(bl.dy, bl.dx)
+                            bl.team_id = b.team_id
+                            bl.x += bl.dx * 2
+                            bl.y += bl.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(bl.y - b.y, bl.x - b.x)
+                            if b.is_angle_in_shield(angle, attacker_role="sniper"):
+                                bl.alive = False
+                                break
+                        b.take_damage(SNIPER_DAMAGE)
+                        bl.alive = False
+                        ddx = b.x - bl.x
+                        ddy = b.y - bl.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 5.0)
+                        break
+
+            # move arrows
+            for ar in arrows:
+                if ar.alive:
+                    ar.move()
+
+            # arrow hit detection
+            for ar in arrows:
+                if not ar.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == ar.team_id:
+                        continue
+                    if dist(ar.x, ar.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ar.dx = -ar.dx
+                            ar.dy = -ar.dy
+                            ar.angle = math.atan2(ar.dy, ar.dx)
+                            ar.team_id = b.team_id
+                            ar.x += ar.dx * 2
+                            ar.y += ar.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ar.y - b.y, ar.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ar.alive = False
+                                break
+                        b.take_damage(ARCHER_DAMAGE)
+                        ar.alive = False
+                        ddx = b.x - ar.x
+                        ddy = b.y - ar.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 3.0)
+                        break
+
+            # move orbs + hit detection
+            for orb in orbs:
+                if not orb.alive:
+                    continue
+                orb.move()
+                if orb.exploding:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == orb.team_id:
+                        continue
+                    if dist(orb.x, orb.y, b.x, b.y) <= b.radius + 6:
+                        if b.role == "mirror":
+                            orb.dx = -orb.dx
+                            orb.dy = -orb.dy
+                            orb.team_id = b.team_id
+                            orb.x += orb.dx * 2
+                            orb.y += orb.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(orb.y - b.y, orb.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                orb.alive = False
+                                break
+                        b.take_damage(WIZARD_DAMAGE)
+                        orb.exploding = True
+                        for other in alive_balls:
+                            if other is b or other.team_id == orb.team_id:
+                                continue
+                            if dist(orb.x, orb.y, other.x, other.y) <= WIZARD_SPLASH_RADIUS:
+                                other.take_damage(WIZARD_SPLASH_DAMAGE)
+                        break
+
+            # move ice bolts + hit detection
+            for ib in ice_bolts:
+                if not ib.alive:
+                    continue
+                ib.move()
+                for b in alive_balls:
+                    if b.team_id == ib.team_id:
+                        continue
+                    if dist(ib.x, ib.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ib.dx = -ib.dx
+                            ib.dy = -ib.dy
+                            ib.angle = math.atan2(ib.dy, ib.dx)
+                            ib.team_id = b.team_id
+                            ib.x += ib.dx * 2
+                            ib.y += ib.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ib.y - b.y, ib.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ib.alive = False
+                                break
+                        b.take_damage(ICE_MAGE_DAMAGE)
+                        b.slow_timer = ICE_SLOW_DURATION
+                        ib.alive = False
+                        break
+
+            # bomb update + explosion damage
+            for bomb in bombs:
+                if not bomb.alive:
+                    continue
+                was_exploding = bomb.exploding
+                bomb.update()
+                if bomb.exploding and not was_exploding:
+                    for b in alive_balls:
+                        if b.team_id == bomb.team_id:
+                            continue
+                        d = dist(bomb.x, bomb.y, b.x, b.y)
+                        if d <= bomb.explosion_radius:
+                            b.take_damage(BOMB_DAMAGE)
+                            dx = b.x - bomb.x
+                            dy = b.y - bomb.y
+                            dd = max(d, 0.01)
+                            b.apply_knockback(dx / dd, dy / dd, BOMB_KNOCKBACK)
+
+            # body collisions
+            for i in range(len(alive_balls)):
+                for j in range(i + 1, len(alive_balls)):
+                    a, b = alive_balls[i], alive_balls[j]
+                    if a.team_id == b.team_id:
+                        if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                            resolve_collision(a, b)
+                        continue
+
+                    if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                        if a.role in ("zombie", "conqueror") and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ZOMBIE_DAMAGE)
+                            a.hit_cooldown = 5
+                        if b.role in ("zombie", "conqueror") and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ZOMBIE_DAMAGE)
+                            b.hit_cooldown = 5
+                        if a.role == "berserker" and a.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * a.rage_multiplier)
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(dmg)
+                            a.hit_cooldown = 20
+                        if b.role == "berserker" and b.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * b.rage_multiplier)
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(dmg)
+                            b.hit_cooldown = 20
+                        if a.role == "shield" and a.hit_cooldown == 0:
+                            b.take_damage(SHIELD_DAMAGE)
+                            a.hit_cooldown = 10
+                        if b.role == "shield" and b.hit_cooldown == 0:
+                            a.take_damage(SHIELD_DAMAGE)
+                            b.hit_cooldown = 10
+                        if a.role == "ninja" and a.invisible and a.hit_cooldown == 0:
+                            b.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            a.invisible = False
+                            a.invis_timer = 0
+                            a.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            a.hit_cooldown = 30
+                        if b.role == "ninja" and b.invisible and b.hit_cooldown == 0:
+                            a.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            b.invisible = False
+                            b.invis_timer = 0
+                            b.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            b.hit_cooldown = 30
+                        if a.role == "vampire" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(VAMPIRE_DAMAGE)
+                                a.hp = min(a.max_hp, a.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            a.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if b.role == "vampire" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(VAMPIRE_DAMAGE)
+                                b.hp = min(b.max_hp, b.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            b.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if a.role == "tank" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(TANK_DAMAGE)
+                            a.hit_cooldown = TANK_HIT_COOLDOWN
+                        if b.role == "tank" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(TANK_DAMAGE)
+                            b.hit_cooldown = TANK_HIT_COOLDOWN
+                        if a.role == "assassin" and a.assassin_dashing > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ASSASSIN_DAMAGE)
+                            a.hit_cooldown = 30
+                            a.assassin_dashing = 0
+                            a.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = a.x - b.x
+                            ddy = a.y - b.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            a.assassin_retreat_dx = ddx / dd
+                            a.assassin_retreat_dy = ddy / dd
+                            a.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if b.role == "assassin" and b.assassin_dashing > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ASSASSIN_DAMAGE)
+                            b.hit_cooldown = 30
+                            b.assassin_dashing = 0
+                            b.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = b.x - a.x
+                            ddy = b.y - a.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            b.assassin_retreat_dx = ddx / dd
+                            b.assassin_retreat_dy = ddy / dd
+                            b.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if a.role == "mirror" and a.hit_cooldown == 0:
+                            b.take_damage(MIRROR_DAMAGE)
+                            a.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if b.role == "mirror" and b.hit_cooldown == 0:
+                            a.take_damage(MIRROR_DAMAGE)
+                            b.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if a.role == "charger" and a.charging > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(CHARGER_DAMAGE)
+                                ddx = b.x - a.x
+                                ddy = b.y - a.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            a.hit_cooldown = 30
+                            a.charging = 0
+                            a.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if b.role == "charger" and b.charging > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(CHARGER_DAMAGE)
+                                ddx = a.x - b.x
+                                ddy = a.y - b.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                a.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            b.hit_cooldown = 30
+                            b.charging = 0
+                            b.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if a.mimic_original and a.mimic_timer <= 0 and b.team_id != a.team_id:
+                            a.role = b.role
+                            a.speed = ROLE_SPEEDS.get(b.role, 3.0)
+                            a.mimic_display_role = b.role
+                            a.mimic_timer = MIMIC_COPY_DURATION
+                        if b.mimic_original and b.mimic_timer <= 0 and a.team_id != b.team_id:
+                            b.role = a.role
+                            b.speed = ROLE_SPEEDS.get(a.role, 3.0)
+                            b.mimic_display_role = a.role
+                            b.mimic_timer = MIMIC_COPY_DURATION
+                        resolve_collision(a, b)
+
+            # sword hits
+            for b in alive_balls:
+                if b.role != "swordsman" or b.hit_cooldown > 0:
+                    continue
+                sbx = b.x + math.cos(b.sword_angle) * b.radius
+                sby = b.y + math.sin(b.sword_angle) * b.radius
+                tx, ty = b.sword_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, sbx, sby, tx, ty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(tx - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = 20
+                                break
+                        other.take_damage(SWORD_DAMAGE)
+                        b.hit_cooldown = 20
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, 10.0)
+                        break
+
+            # hammer hits
+            for b in alive_balls:
+                if b.role != "hammer" or b.hit_cooldown > 0:
+                    continue
+                tx, ty = b.hammer_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if dist(other.x, other.y, tx, ty) <= other.radius + HAMMER_HEAD_SIZE:
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                                break
+                        other.take_damage(HAMMER_DAMAGE)
+                        b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, HAMMER_KNOCKBACK)
+                        break
+
+            # chainsaw hits
+            for b in alive_balls:
+                if b.role != "chainsaw" or b.hit_cooldown > 0:
+                    continue
+                cbx = b.x + math.cos(b.chainsaw_angle) * b.radius
+                cby = b.y + math.sin(b.chainsaw_angle) * b.radius
+                ctx, cty = b.chainsaw_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, cbx, cby, ctx, cty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(ctx - other.y, ctx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                continue
+                        other.take_damage(CHAINSAW_DAMAGE)
+                        b.hit_cooldown = CHAINSAW_HIT_COOLDOWN
+                        break
+
+            # wall update + ball-wall collisions
+            for w in walls:
+                if not w.alive:
+                    continue
+                w.update()
+                if w.exploding:
+                    if w.explode_frames == 9:
+                        blast_angle = math.atan2(w.blast_dy, w.blast_dx)
+                        spread = math.pi / 3
+                        for b in alive_balls:
+                            if b.team_id == w.team_id:
+                                continue
+                            d = dist(w.x, w.y, b.x, b.y)
+                            if d > FORT_EXPLODE_RADIUS:
+                                continue
+                            angle_to = math.atan2(b.y - w.y, b.x - w.x)
+                            diff = (angle_to - blast_angle + math.pi) % (2 * math.pi) - math.pi
+                            if abs(diff) <= spread:
+                                b.take_damage(FORT_EXPLODE_DAMAGE)
+                                ddx = b.x - w.x
+                                ddy = b.y - w.y
+                                dd = max(d, 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 12.0)
+                    continue
+                x1, y1, x2, y2 = w.endpoints()
+                for b in alive_balls:
+                    if b.team_id == w.team_id:
+                        continue
+                    if point_near_segment(b.x, b.y, x1, y1, x2, y2, b.radius + w.thickness // 2):
+                        w.hp -= 1
+                        ddx = b.x - w.x
+                        ddy = b.y - w.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 6.0)
+
+            # kill dead balls — add to respawn queue instead of permanent death
+            for b in balls:
+                if b.hp <= 0 and b.alive:
+                    b.alive = False
+                    # don't respawn minions
+                    if not getattr(b, 'is_minion', False):
+                        respawn_queue.append((b, frame_count + KOTH_RESPAWN_DELAY))
+
+            # process respawn queue
+            for entry in respawn_queue[:]:
+                b, respawn_frame = entry
+                if frame_count >= respawn_frame:
+                    respawn_queue.remove(entry)
+                    # respawn at a random edge
+                    edge = random.choice(["top", "bottom", "left", "right"])
+                    margin = BALL_RADIUS + 10
+                    if edge == "top":
+                        b.x = random.randint(margin, WIDTH - margin)
+                        b.y = margin
+                    elif edge == "bottom":
+                        b.x = random.randint(margin, WIDTH - margin)
+                        b.y = HEIGHT - margin
+                    elif edge == "left":
+                        b.x = margin
+                        b.y = random.randint(margin, HEIGHT - margin)
+                    else:
+                        b.x = WIDTH - margin
+                        b.y = random.randint(margin, HEIGHT - margin)
+                    b.alive = True
+                    b.hp = b.max_hp
+                    b.vx = 0
+                    b.vy = 0
+                    b.bounce_timer = 0
+                    b.pinned_timer = 0
+                    b.carried_by_spear = False
+                    b.trapped_in = None
+                    b.hit_cooldown = 0
+
+            # clean up dead projectiles
+            spears = [s for s in spears if s.alive]
+            traps = [t for t in traps if t.alive]
+            bombs = [bm for bm in bombs if bm.alive]
+            bullets = [bl for bl in bullets if bl.alive]
+            arrows = [ar for ar in arrows if ar.alive]
+            orbs = [orb for orb in orbs if orb.alive]
+            ice_bolts = [ib for ib in ice_bolts if ib.alive]
+            walls = [w for w in walls if w.alive]
+
+            # KOTH scoring — count balls on hill per team
+            score_timer += 1
+            if score_timer >= KOTH_SCORE_INTERVAL:
+                score_timer = 0
+                hill_counts = {}
+                for b in alive_balls:
+                    if dist(b.x, b.y, hill_cx, hill_cy) <= KOTH_HILL_RADIUS:
+                        hill_counts[b.team_id] = hill_counts.get(b.team_id, 0) + 1
+                if hill_counts:
+                    max_count = max(hill_counts.values())
+                    leaders = [tid for tid, c in hill_counts.items() if c == max_count]
+                    if len(leaders) == 1:
+                        controlling_team = leaders[0]
+                        scores[controlling_team] += 1
+                    else:
+                        controlling_team = None  # contested
+                else:
+                    controlling_team = None
+
+            # check for KOTH winner
+            for tid, sc in scores.items():
+                if sc >= KOTH_WIN_SCORE:
+                    winner_team = tid
+                    break
+
+        # ── draw ──
+        screen.fill((20, 20, 30))
+        pygame.draw.rect(screen, (80, 80, 80), (0, 0, WIDTH, HEIGHT), 2)
+
+        # draw hill zone
+        pulse = int(15 * math.sin(frame_count * 0.05))
+        if controlling_team is not None:
+            hill_color = TEAM_COLORS[controlling_team % len(TEAM_COLORS)]
+            # semi-transparent fill via a surface
+            hill_surf = pygame.Surface((KOTH_HILL_RADIUS * 2, KOTH_HILL_RADIUS * 2), pygame.SRCALPHA)
+            pygame.draw.circle(hill_surf, (*hill_color, 40 + pulse),
+                               (KOTH_HILL_RADIUS, KOTH_HILL_RADIUS), KOTH_HILL_RADIUS)
+            screen.blit(hill_surf, (hill_cx - KOTH_HILL_RADIUS, hill_cy - KOTH_HILL_RADIUS))
+            pygame.draw.circle(screen, hill_color, (hill_cx, hill_cy), KOTH_HILL_RADIUS, 3)
+        else:
+            hill_surf = pygame.Surface((KOTH_HILL_RADIUS * 2, KOTH_HILL_RADIUS * 2), pygame.SRCALPHA)
+            pygame.draw.circle(hill_surf, (200, 200, 200, 25 + pulse),
+                               (KOTH_HILL_RADIUS, KOTH_HILL_RADIUS), KOTH_HILL_RADIUS)
+            screen.blit(hill_surf, (hill_cx - KOTH_HILL_RADIUS, hill_cy - KOTH_HILL_RADIUS))
+            pygame.draw.circle(screen, (200, 200, 200), (hill_cx, hill_cy), KOTH_HILL_RADIUS, 2)
+
+        # draw "HILL" label in center
+        hill_label = small_font.render("HILL", True, (180, 180, 180))
+        screen.blit(hill_label, (hill_cx - hill_label.get_width() // 2,
+                                 hill_cy - hill_label.get_height() // 2))
+
+        # draw traps, bombs, walls, fences first (under balls)
+        for w in walls:
+            w.draw(screen)
+        for f in fences:
+            f.draw(screen)
+        for t in traps:
+            t.draw(screen)
+        for bm in bombs:
+            bm.draw(screen)
+
+        for b in balls:
+            if b.alive:
+                b.draw(screen)
+
+        # draw spears and bullets on top
+        for s in spears:
+            s.draw(screen)
+        for bl in bullets:
+            bl.draw(screen)
+        for ar in arrows:
+            ar.draw(screen)
+        for orb in orbs:
+            orb.draw(screen)
+        for ib in ice_bolts:
+            ib.draw(screen)
+
+        # draw respawn indicators at edges
+        for entry in respawn_queue:
+            b, respawn_frame = entry
+            frames_left = respawn_frame - frame_count
+            if frames_left > 0:
+                secs = frames_left / 60.0
+                color = TEAM_COLORS[b.team_id % len(TEAM_COLORS)]
+                dim_color = (color[0] // 3, color[1] // 3, color[2] // 3)
+                pygame.draw.circle(screen, dim_color, (int(b.x), int(b.y)), b.radius // 2)
+                timer_text = small_font.render(f"{secs:.1f}s", True, color)
+                screen.blit(timer_text, (int(b.x) - timer_text.get_width() // 2,
+                                         int(b.y) - b.radius - 10))
+
+        # HUD — Scoreboard at top
+        hud_y = 8
+        for tid in team_ids:
+            color = TEAM_COLORS[tid % len(TEAM_COLORS)]
+            sc = scores[tid]
+            pct = min(1.0, sc / KOTH_WIN_SCORE)
+            # team label with score
+            label = font.render(f"T{tid+1}: {sc}/{KOTH_WIN_SCORE}", True, color)
+            screen.blit(label, (10, hud_y))
+            # progress bar
+            bar_x = label.get_width() + 18
+            bar_w = 120
+            bar_h = 14
+            pygame.draw.rect(screen, (50, 50, 60), (bar_x, hud_y + 2, bar_w, bar_h), border_radius=3)
+            if pct > 0:
+                pygame.draw.rect(screen, color, (bar_x, hud_y + 2, int(bar_w * pct), bar_h), border_radius=3)
+            hud_y += 22
+
+        # speed indicator
+        if paused:
+            speed_text = font.render("PAUSED  (Space)", True, (255, 255, 100))
+        else:
+            speed_text = font.render(f"Speed: {game_speed}x  (1/2/3/4)", True, (180, 180, 180))
+        screen.blit(speed_text, (WIDTH - speed_text.get_width() - 10, 8))
+
+        # mode label
+        mode_label = small_font.render("KING OF THE HILL", True, (200, 180, 80))
+        screen.blit(mode_label, (WIDTH - mode_label.get_width() - 10, 28))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
 def main():
     global WIDTH, HEIGHT, screen
     saved_teams = None
     saved_num_teams = None
     saved_arena_idx = None
+    saved_game_mode = None
     while True:
         WIDTH, HEIGHT = BASE_WIDTH, BASE_HEIGHT
         screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        result = setup_menu(saved_teams, saved_num_teams, saved_arena_idx)
-        team_configs, saved_teams, saved_num_teams, saved_arena_idx = result
+        result = setup_menu(saved_teams, saved_num_teams, saved_arena_idx, saved_game_mode)
+        team_configs, saved_teams, saved_num_teams, saved_arena_idx, saved_game_mode = result
         if team_configs == "tournament":
             t_result = tournament_menu(saved_arena_idx)
             if t_result is not None:
@@ -6464,6 +8036,14 @@ def main():
                 run_tournament(bracket, saved_arena_idx, realistic)
         elif team_configs == "interactive":
             interactive_mode()
+        elif team_configs == "koth":
+            sync_teams = saved_teams
+            num_teams = saved_num_teams
+            koth_configs = []
+            for i in range(num_teams):
+                for role in sync_teams[i]:
+                    koth_configs.append({"team_id": i, "role": role})
+            king_of_the_hill(koth_configs, saved_arena_idx)
         else:
             game(team_configs, saved_arena_idx)
 
