@@ -231,6 +231,91 @@ KOTH_SCORE_INTERVAL = 30    # frames between point awards (~0.5s)
 KOTH_WIN_SCORE = 100
 KOTH_RESPAWN_DELAY = 120    # frames (~2 seconds)
 
+# Protect the King constants
+PTK_KING_HP = 150
+PTK_KING_MAX_HP = 150
+PTK_GUARD_RESPAWN_DELAY = 600    # 10 seconds
+PTK_GUARD_LEASH = 120.0          # tight leash - guards stay close to King
+PTK_KING_FLEE_DIST = 200.0       # King flees enemies within this range
+PTK_CROWN_COLOR = (255, 215, 0)  # gold
+PTK_ELIM_COLOR = (60, 60, 60)    # greyed out
+
+# Tag Team constants
+TT_SWAP_DELAY = 120              # 2 seconds before next fighter enters
+TT_ENTRANCE_INVULN = 60         # 1 second invulnerability on entry
+
+# Infection mode constants
+INFECTION_RESPAWN_DELAY = 120   # frames (~2 seconds)
+INFECTION_TEAM_ID = 99          # special team_id for infected
+INFECTION_COLOR = (100, 200, 50)  # sickly green
+
+# Hunger Games mode constants
+HG_POWERUP_RADIUS = 12
+HG_PICKUP_DIST = 55
+HG_POWERUP_RESPAWN_TIME = 900       # 15 sec
+HG_BETRAYAL_MIN_TIMER = 600         # 10 sec
+HG_BETRAYAL_MAX_TIMER = 1800        # 30 sec
+HG_ALLIANCE_INVITE_RANGE = 120
+HG_SCARED_FLEE_RANGE = 200
+PERSONALITY_NAMES = {1: "Scared", 2: "Friendly", 3: "Aggressive", 4: "Traitorous", 5: "Leader"}
+
+# 30 unique FFA colors
+HG_FFA_COLORS = [(220,60,60), (60,120,220), (60,200,80), (220,180,40),
+                  (180,60,220), (220,130,40), (255,100,150), (100,200,200),
+                  (200,200,100), (150,80,40), (80,220,180), (220,80,180),
+                  (100,100,220), (220,150,150), (50,180,50), (180,180,220),
+                  (220,100,100), (100,180,100), (180,100,180), (140,200,60),
+                  (60,140,200), (200,140,60), (140,60,200), (200,60,140),
+                  (60,200,140), (200,200,60), (60,60,200), (200,60,60),
+                  (60,200,60), (160,160,160)]
+
+# Base role preference ranking (all balls start near this, with random shuffles)
+HG_BASE_ROLE_RANKING = ["sniper","wizard","assassin","ninja","vampire","archer",
+    "ice_mage","shield","swordsman","berserker","hammer","chainsaw","tank",
+    "charger","bomber","spearman","fortifier","trapper","fencer",
+    "summoner","mirror","mimic","conqueror","healer","necromancer"]
+
+# Color per role for power-up display
+# Evolution mode constants
+EVO_RESPAWN_DELAY = 180   # 3 seconds
+EVO_MAX_TIER = 23
+EVO_TIER_LIST = [
+    "zombie",      # 0  - starting tier
+    "swordsman",   # 1  - basic melee damage dealer
+    "spearman",    # 2
+    "bomber",      # 3
+    "fencer",      # 4
+    "chainsaw",    # 5
+    "conqueror",   # 6
+    "hammer",      # 7
+    "berserker",   # 8
+    "archer",      # 9
+    "ice_mage",    # 10
+    "shield",      # 11
+    "charger",     # 12
+    "trapper",     # 13
+    "fortifier",   # 14
+    "mimic",       # 15
+    "summoner",    # 16
+    "mirror",      # 17
+    "vampire",     # 18
+    "tank",        # 19
+    "ninja",       # 20
+    "wizard",      # 21
+    "assassin",    # 22
+    "sniper",      # 23 - win tier
+]
+
+POWERUP_COLORS = {role: color for role, color in zip(
+    ["swordsman","spearman","trapper","bomber","healer","ninja","shield","sniper",
+     "berserker","chainsaw","fortifier","vampire","archer","wizard","tank","assassin",
+     "necromancer","ice_mage","summoner","mirror","charger","mimic","conqueror","hammer","fencer"],
+    [(180,180,180),(160,120,80),(120,100,60),(60,60,60),(255,100,100),(80,0,80),
+     (100,150,220),(255,220,50),(200,50,50),(200,100,50),(140,140,100),(100,0,0),
+     (120,80,40),(150,50,200),(80,120,80),(50,50,50),(100,60,100),(100,180,255),
+     (200,150,255),(180,220,220),(160,80,40),(200,200,200),(255,200,50),(140,100,80),(180,120,60)]
+)}
+
 TEAM_COLORS = [
     (220, 60, 60),    # red
     (60, 120, 220),   # blue
@@ -778,6 +863,30 @@ class Fence:
                              (int(mx + px * 4), int(my + py * 4)), 1)
 
 
+class PowerUp:
+    """A collectible power-up that grants a role upgrade in Hunger Games mode."""
+    def __init__(self, x, y, role):
+        self.x = x
+        self.y = y
+        self.role = role
+        self.alive = True
+        self.radius = HG_POWERUP_RADIUS
+        self.bob_offset = random.uniform(0, 2 * math.pi)
+
+    def draw(self, surface, frame_count):
+        if not self.alive:
+            return
+        bob = math.sin(frame_count * 0.05 + self.bob_offset) * 4
+        py = int(self.y + bob)
+        color = POWERUP_COLORS.get(self.role, (200, 200, 200))
+        pygame.draw.circle(surface, color, (int(self.x), py), self.radius)
+        pygame.draw.circle(surface, (255, 255, 255), (int(self.x), py), self.radius, 2)
+        letter = self.role[0].upper()
+        ltxt = small_font.render(letter, True, (255, 255, 255))
+        surface.blit(ltxt, (int(self.x) - ltxt.get_width() // 2,
+                            py - ltxt.get_height() // 2))
+
+
 # ── UI helpers ──────────────────────────────────────────────
 
 class Button:
@@ -823,15 +932,31 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
         num_teams = 2
 
     arena_idx = saved_arena_idx if saved_arena_idx is not None else 2  # default 1v1
+    game_mode = saved_game_mode if saved_game_mode is not None else "normal"
 
     def sync_teams():
         nonlocal teams, num_teams
         # clamp num_teams to valid range
-        num_teams = max(2, min(6, num_teams))
+        max_teams = 30 if game_mode in ("infection", "hunger_games", "evolution") else 6
+        num_teams = max(2, min(max_teams, num_teams))
         while len(teams) < num_teams:
             teams.append([ROLES[len(teams) % len(ROLES)]])
         while len(teams) > num_teams:
             teams.pop()
+        # FFA modes: force 1 member per team
+        if game_mode in ("infection", "hunger_games", "evolution"):
+            for i in range(len(teams)):
+                if len(teams[i]) > 1:
+                    teams[i] = [teams[i][0]]
+        # hunger games / evolution: force all to zombie
+        if game_mode in ("hunger_games", "evolution"):
+            for i in range(len(teams)):
+                teams[i] = ["zombie"]
+        # protect the king / tag team: enforce minimum 2 members per team
+        if game_mode in ("protect_the_king", "tag_team"):
+            for i in range(len(teams)):
+                while len(teams[i]) < 2:
+                    teams[i].append(ROLES[0])
 
     sync_teams()
     prev_size = (0, 0)
@@ -847,13 +972,17 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
     dropdown_scroll = 0  # scroll offset for dropdown list
 
     # game mode dropdown state
-    game_mode = saved_game_mode if saved_game_mode is not None else "normal"
     mode_dropdown_open = False
     GAME_MODES = [
         ("normal",      "Normal"),
         ("tournament",  "Tournament"),
         ("interactive", "Interactive"),
         ("koth",        "King of Hill"),
+        ("infection",   "Infection"),
+        ("hunger_games", "Hunger Games"),
+        ("evolution",   "Evolution"),
+        ("protect_the_king", "Protect King"),
+        ("tag_team",        "Tag Team"),
     ]
     mode_selector_rect = pygame.Rect(0, 0, 0, 0)
 
@@ -912,11 +1041,11 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
                     arena_idx -= 1
                 if plus_arena_rect.collidepoint(mx, my) and arena_idx < len(ARENA_SIZES) - 1:
                     arena_idx += 1
-                if randomize_btn.clicked(mx, my):
+                if randomize_btn.clicked(mx, my) and game_mode not in ("hunger_games", "evolution"):
                     for i in range(len(teams)):
                         for j in range(len(teams[i])):
                             teams[i][j] = random.choice(ROLES)
-                if randomize_all_btn.clicked(mx, my):
+                if randomize_all_btn.clicked(mx, my) and game_mode not in ("hunger_games", "evolution"):
                     num_teams = random.randint(2, 6)
                     teams = []
                     for i in range(num_teams):
@@ -943,7 +1072,7 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
                 if start_btn.clicked(mx, my):
                     mode_dropdown_open = False
                     sync_teams()
-                    if game_mode in ("tournament", "interactive", "koth"):
+                    if game_mode in ("tournament", "interactive", "koth", "infection", "hunger_games", "evolution", "protect_the_king", "tag_team"):
                         return game_mode, teams, num_teams, arena_idx, game_mode
                     else:
                         result = []
@@ -954,20 +1083,22 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
                 if minus_teams_rect.collidepoint(mx, my) and num_teams > 2:
                     num_teams -= 1
                     sync_teams()
-                if plus_teams_rect.collidepoint(mx, my) and num_teams < 6:
+                max_t = 30 if game_mode in ("infection", "hunger_games", "evolution") else 6
+                if plus_teams_rect.collidepoint(mx, my) and num_teams < max_t:
                     num_teams += 1
                     sync_teams()
                 for i in range(min(num_teams, len(teams))):
                     rects = member_rects.get(i, [])
                     for j, mr in enumerate(rects):
-                        if "role" in mr and mr["role"].collidepoint(mx, my):
+                        if "role" in mr and mr["role"].collidepoint(mx, my) and game_mode not in ("hunger_games", "evolution"):
                             search_open = (i, j)
                             search_text = ""
-                        if "remove" in mr and mr["remove"].collidepoint(mx, my) and len(teams[i]) > 1:
+                        min_members = 2 if game_mode in ("protect_the_king", "tag_team") else 1
+                        if "remove" in mr and mr["remove"].collidepoint(mx, my) and len(teams[i]) > min_members:
                             teams[i].pop(j)
                             break
                     tr = team_rects.get(i, {})
-                    if "add" in tr and tr["add"].collidepoint(mx, my) and len(teams[i]) < 5:
+                    if "add" in tr and tr["add"].collidepoint(mx, my) and len(teams[i]) < 5 and game_mode not in ("infection", "hunger_games", "evolution"):
                         teams[i].append(ROLES[0])
 
         # recompute layout AFTER events so indices are always fresh
@@ -1010,7 +1141,8 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
         screen.blit(t, (menu_w // 2 - t.get_width() // 2, 20))
 
         ty = 65
-        label = font.render("Teams:", True, (200, 200, 200))
+        teams_label = "Balls:" if game_mode in ("infection", "hunger_games", "evolution") else "Teams:"
+        label = font.render(teams_label, True, (200, 200, 200))
         screen.blit(label, (menu_w // 2 - 90, ty))
 
         minus_teams_rect = pygame.Rect(menu_w // 2, ty - 2, 30, 26)
@@ -1056,18 +1188,26 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
                 color = TEAM_COLORS[i % len(TEAM_COLORS)]
 
                 pygame.draw.circle(screen, color, (col_x + 10, cur_y + 10), 10)
-                tl = font.render(f"Team {i + 1}", True, color)
+                if game_mode in ("infection", "hunger_games", "evolution"):
+                    tl = font.render(f"Ball {i + 1}", True, color)
+                else:
+                    tl = font.render(f"Team {i + 1}", True, color)
                 screen.blit(tl, (col_x + 28, cur_y))
 
                 add_rect = pygame.Rect(col_x + 120, cur_y - 2, 22, 22)
                 team_rects[i]["add"] = add_rect
-                pygame.draw.rect(screen, (50, 100, 50), add_rect, border_radius=4)
-                screen.blit(small_font.render("+", True, (255, 255, 255)),
-                            (add_rect.centerx - 3, add_rect.centery - 7))
+                if game_mode not in ("infection", "hunger_games", "evolution"):
+                    pygame.draw.rect(screen, (50, 100, 50), add_rect, border_radius=4)
+                    screen.blit(small_font.render("+", True, (255, 255, 255)),
+                                (add_rect.centerx - 3, add_rect.centery - 7))
 
                 cur_y += 28
                 for j, role in enumerate(teams[i]):
                     mr = {}
+                    if game_mode in ("hunger_games", "evolution"):
+                        # Don't show role selector — all start as zombie
+                        member_rects[i].append(mr)
+                        continue
                     role_rect = pygame.Rect(col_x + 30, cur_y, 100, 24)
                     mr["role"] = role_rect
                     pygame.draw.rect(screen, (60, 60, 80), role_rect, border_radius=4)
@@ -1075,7 +1215,7 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
                     rl = small_font.render(role.capitalize(), True, (255, 255, 255))
                     screen.blit(rl, (role_rect.centerx - rl.get_width() // 2,
                                      role_rect.centery - rl.get_height() // 2))
-                    if len(teams[i]) > 1:
+                    if len(teams[i]) > 1 and game_mode not in ("infection", "hunger_games", "evolution"):
                         rem_rect = pygame.Rect(col_x + 136, cur_y, 22, 24)
                         mr["remove"] = rem_rect
                         pygame.draw.rect(screen, (100, 40, 40), rem_rect, border_radius=4)
@@ -1086,7 +1226,16 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
                     cur_y += 28
                 cur_y += 10
 
-        hint = small_font.render("Click role to search  |  + to add member  |  x to remove", True, (120, 120, 140))
+        if game_mode in ("hunger_games", "evolution"):
+            hint = small_font.render("+/- to add/remove balls  |  All start as zombies", True, (120, 120, 140))
+        elif game_mode == "infection":
+            hint = small_font.render("Click role to search  |  +/- to add/remove balls", True, (120, 120, 140))
+        elif game_mode == "protect_the_king":
+            hint = small_font.render("Click role to search  |  Min 2 per team (1 King + guards)", True, (120, 120, 140))
+        elif game_mode == "tag_team":
+            hint = small_font.render("Click role to search  |  Min 2 per team  |  1 fights at a time", True, (120, 120, 140))
+        else:
+            hint = small_font.render("Click role to search  |  + to add member  |  x to remove", True, (120, 120, 140))
         screen.blit(hint, (menu_w // 2 - hint.get_width() // 2, menu_h - 110))
 
         randomize_btn.draw(screen)
@@ -1274,6 +1423,31 @@ class Ball:
         self.boss_cooldown_overrides = {}  # e.g. {"sniper_cooldown": 90}
         # KOTH mode
         self.koth_hill_center = None       # (x, y) tuple when in KOTH mode
+        # Infection mode
+        self._infection_mode = False       # True when playing infection mode
+        self.last_hit_by_team = None       # team_id of last attacker
+        # Hunger Games mode
+        self._hunger_games_mode = False
+        self.hg_personality = 0          # 1-5
+        self.hg_role_prefs = []          # shuffled preference list
+        self.hg_alliance_id = None       # int alliance ID
+        self.hg_original_color = None    # remember FFA color
+        self.hg_is_leader = False
+        self.hg_leader_ref = None        # ref to alliance leader Ball
+        self.hg_leader_target = None     # Ball ref - leader's ordered target
+        self.hg_betrayal_timer = 0       # frames until traitor betrays
+        self.hg_alliance_timer = 0       # cooldown before rejoining
+        self.hg_kill_count = 0
+        self.hg_betrayed_by = set()  # team_ids of balls that betrayed this ball
+        # Evolution mode
+        self._evolution_mode = False
+        self.evo_tier = 0
+        self.evo_original_color = None
+        # Protect the King mode
+        self.is_king = False
+        self.ptk_mode = False
+        # Tag Team mode
+        self.tt_invuln = 0  # invulnerability frames on entry
 
     def has_ability(self, role_name):
         """Check if this ball has a given role's ability (base role or boss extra)."""
@@ -1324,6 +1498,35 @@ class Ball:
                     hill_enemies.append(e)
             if hill_enemies:
                 return min(hill_enemies, key=lambda b: dist(self.x, self.y, b.x, b.y))
+            return None
+
+        # Infection mode: survivors prioritize nearby infected targets
+        if self._infection_mode and self.team_id != INFECTION_TEAM_ID:
+            infected_enemies = [e for e in enemies if e.team_id == INFECTION_TEAM_ID]
+            nearby_infected = [e for e in infected_enemies if dist(self.x, self.y, e.x, e.y) <= 200]
+            if nearby_infected:
+                return min(nearby_infected, key=lambda b: dist(self.x, self.y, b.x, b.y))
+            # no infected nearby — fall through to normal targeting (may fight survivors)
+
+        # Infection mode: infected always target nearest survivor (simple zombie behavior)
+        if self._infection_mode and self.team_id == INFECTION_TEAM_ID:
+            return min(enemies, key=lambda b: dist(self.x, self.y, b.x, b.y))
+
+        # PTK guard: king protection is the #1 priority — intercept anyone near king
+        if self.ptk_mode and not self.is_king and self.defend_ball is not None and self.defend_ball.alive:
+            king = self.defend_ball
+            # priority 1: whoever last hit the king
+            if king.last_hit_by_team is not None:
+                attacker = None
+                for e in enemies:
+                    if e.team_id == king.last_hit_by_team:
+                        attacker = e
+                        break
+                if attacker is not None:
+                    return attacker
+            # priority 2: closest enemy to king (any range — guards will cross the map)
+            if enemies:
+                return min(enemies, key=lambda b: dist(king.x, king.y, b.x, b.y))
             return None
 
         # defend assignment: prioritize enemies threatening the defended ball
@@ -1484,12 +1687,46 @@ class Ball:
         if self.bounce_timer > 0 or self.pinned_timer > 0 or self.carried_by_spear or self.trapped_in is not None:
             return
 
+        # PTK King flee AI — king runs from enemies, drifts toward guard centroid
+        if self.ptk_mode and self.is_king and all_balls is not None:
+            enemies_near = [b for b in all_balls if b.alive and b.team_id != self.team_id
+                            and dist(self.x, self.y, b.x, b.y) < PTK_KING_FLEE_DIST]
+            # check if we have living guards
+            guards = [b for b in all_balls if b.alive and b.team_id == self.team_id and not b.is_king]
+            if enemies_near and guards:
+                # flee: weighted flee vector (closer enemies push harder)
+                fx, fy = 0.0, 0.0
+                for e in enemies_near:
+                    d = max(dist(self.x, self.y, e.x, e.y), 1.0)
+                    weight = (PTK_KING_FLEE_DIST / d) ** 2
+                    fx += (self.x - e.x) / d * weight
+                    fy += (self.y - e.y) / d * weight
+                mag = math.sqrt(fx * fx + fy * fy)
+                if mag > 0:
+                    self.vx = (fx / mag) * self.speed
+                    self.vy = (fy / mag) * self.speed
+                return
+            elif not enemies_near and guards:
+                # drift toward guard centroid to stay protected
+                gx = sum(b.x for b in guards) / len(guards)
+                gy = sum(b.y for b in guards) / len(guards)
+                d_to_guards = dist(self.x, self.y, gx, gy)
+                if d_to_guards > BALL_RADIUS * 5:
+                    self.vx = ((gx - self.x) / max(d_to_guards, 0.01)) * self.speed * 0.5
+                    self.vy = ((gy - self.y) / max(d_to_guards, 0.01)) * self.speed * 0.5
+                else:
+                    self.vx *= 0.5
+                    self.vy *= 0.5
+                return
+            # if no guards left, fall through to normal role AI
+
         # defend assignment: follow the defended ball when no target in range
         if self.defend_ball is not None and self.defend_ball.alive:
             db = self.defend_ball
             d_to_ward = dist(self.x, self.y, db.x, db.y)
             # if we have a target, check if it's too far from our ward
-            if target is not None:
+            # PTK guards never drop their target — king protection is absolute
+            if target is not None and not self.ptk_mode:
                 d_target = dist(self.x, self.y, target.x, target.y)
                 if d_target > self.position_leash * 1.5 and d_to_ward > self.position_leash * 0.5:
                     # target too far, return to ward
@@ -2097,6 +2334,8 @@ class Ball:
                     self.invis_cooldown = NINJA_INVIS_COOLDOWN
             if self.role == "swordsman":
                 self.sword_angle += SWORD_SPIN_SPEED
+            if self.role == "hammer":
+                self.hammer_angle += HAMMER_SPIN_SPEED
             if self.role == "chainsaw":
                 self.chainsaw_angle += CHAINSAW_SPIN_SPEED
             if self.wall_cooldown > 0:
@@ -2146,6 +2385,8 @@ class Ball:
                     self.invis_cooldown = NINJA_INVIS_COOLDOWN
             if self.role == "swordsman":
                 self.sword_angle += SWORD_SPIN_SPEED
+            if self.role == "hammer":
+                self.hammer_angle += HAMMER_SPIN_SPEED
             if self.role == "chainsaw":
                 self.chainsaw_angle += CHAINSAW_SPIN_SPEED
             if self.wall_cooldown > 0:
@@ -2246,6 +2487,8 @@ class Ball:
 
     def take_damage(self, amount):
         """Apply damage with armor reduction for tank or boss with tank ability."""
+        if self.tt_invuln > 0:
+            return  # invulnerable during tag team entrance
         if self.has_ability("tank"):
             amount = max(1, int(amount * TANK_ARMOR))
         self.hp -= amount
@@ -2594,6 +2837,30 @@ class Ball:
         hp_w = max(0, (self.hp / self.max_hp) * bar_w)
         bar_color = (0, 200, 0) if self.hp > 40 else (200, 200, 0) if self.hp > 20 else (200, 0, 0)
         pygame.draw.rect(surface, bar_color, (bar_x, bar_y, hp_w, bar_h))
+
+        # PTK King crown
+        if self.is_king and self.ptk_mode:
+            cx_i, cy_i = int(self.x), int(self.y)
+            # pulsing gold outline
+            pygame.draw.circle(surface, PTK_CROWN_COLOR, (cx_i, cy_i), self.radius + 4, 2)
+            # crown polygon (3-prong) above ball
+            crown_base_y = cy_i - self.radius - 14
+            crown_top_y = crown_base_y - 10
+            crown_w = 12
+            pts = [
+                (cx_i - crown_w, crown_base_y),
+                (cx_i - crown_w, crown_top_y + 4),
+                (cx_i - crown_w // 2, crown_top_y),
+                (cx_i, crown_top_y + 4),
+                (cx_i + crown_w // 2, crown_top_y),
+                (cx_i + crown_w, crown_top_y + 4),
+                (cx_i + crown_w, crown_base_y),
+            ]
+            pygame.draw.polygon(surface, PTK_CROWN_COLOR, pts)
+            pygame.draw.polygon(surface, (180, 150, 0), pts, 2)
+            # "KING" label
+            king_txt = small_font.render("KING", True, PTK_CROWN_COLOR)
+            surface.blit(king_txt, (cx_i - king_txt.get_width() // 2, crown_top_y - 14))
 
     def _draw_sword(self, surface):
         angle = self.sword_angle
@@ -8018,6 +8285,4724 @@ def king_of_the_hill(team_configs, arena_idx=0):
         clock.tick(60)
 
 
+def infection_mode(team_configs, arena_idx=0):
+    global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
+    total_balls = len(team_configs)
+
+    aw, ah, a_hint = ARENA_SIZES[arena_idx]
+    WIDTH = aw
+    HEIGHT = ah
+
+    if total_balls > 6:
+        BALL_RADIUS = max(12, BASE_BALL_RADIUS - (total_balls - 6) * 2)
+    else:
+        BALL_RADIUS = BASE_BALL_RADIUS
+    SWORD_LENGTH = BALL_RADIUS * 2
+    TRAP_RADIUS = BALL_RADIUS * 4
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+    balls = spawn_balls(team_configs)
+    spears = []
+    traps = []
+    bombs = []
+    bullets = []
+    arrows = []
+    orbs = []
+    ice_bolts = []
+    walls = []
+    fences = []
+    winner_text = None
+    winner_color = (255, 255, 255)
+    speed_options = [1, 2, 4, 10]
+    speed_index = 0
+    paused = False
+
+    # pick 2 random balls to infect
+    if len(balls) >= 2:
+        infected_picks = random.sample(balls, 2)
+    else:
+        infected_picks = list(balls)
+    for b in infected_picks:
+        b.team_id = INFECTION_TEAM_ID
+        b.color = INFECTION_COLOR
+        b.role = "zombie"
+        b.speed = ROLE_SPEEDS.get("zombie", 3.5)
+        b.hp = 100
+        b.max_hp = 100
+        b.mimic_original = False
+        b.mimic_timer = 0
+
+    # set infection mode flag on all balls
+    for b in balls:
+        b._infection_mode = True
+
+    # assign unique non-green colors to survivors (no green — reserved for infected)
+    non_green_colors = [c for c in HG_FFA_COLORS if c[1] < 150 or c[0] > c[1] or c[2] > c[1]]
+    while len(non_green_colors) < len(balls):
+        non_green_colors.append((random.randint(100, 255), random.randint(30, 100), random.randint(100, 255)))
+    random.shuffle(non_green_colors)
+    survivors = [b for b in balls if b.team_id != INFECTION_TEAM_ID]
+    for i, b in enumerate(survivors):
+        b.color = non_green_colors[i % len(non_green_colors)]
+
+    # strategic positioning — survivors claim corners/edges and hold position
+    margin = BALL_RADIUS * 4
+    positions = [
+        (margin, margin),                          # top-left corner
+        (WIDTH - margin, margin),                   # top-right corner
+        (margin, HEIGHT - margin),                  # bottom-left corner
+        (WIDTH - margin, HEIGHT - margin),          # bottom-right corner
+        (WIDTH // 2, margin),                       # top-center
+        (WIDTH // 2, HEIGHT - margin),              # bottom-center
+        (margin, HEIGHT // 2),                      # left-center
+        (WIDTH - margin, HEIGHT // 2),              # right-center
+        (WIDTH // 4, HEIGHT // 4),                  # inner top-left
+        (3 * WIDTH // 4, HEIGHT // 4),              # inner top-right
+        (WIDTH // 4, 3 * HEIGHT // 4),              # inner bottom-left
+        (3 * WIDTH // 4, 3 * HEIGHT // 4),          # inner bottom-right
+        (WIDTH // 2, HEIGHT // 2),                  # center
+        (WIDTH // 3, HEIGHT // 2),                  # left-mid
+        (2 * WIDTH // 3, HEIGHT // 2),              # right-mid
+    ]
+    while len(positions) < len(survivors):
+        positions.append((random.randint(margin, WIDTH - margin),
+                          random.randint(margin, HEIGHT - margin)))
+    random.shuffle(positions)
+    for i, b in enumerate(survivors):
+        px, py = positions[i % len(positions)]
+        b.assigned_x = px
+        b.assigned_y = py
+        b.position_leash = 180.0
+        b.x = px + random.randint(-30, 30)
+        b.y = py + random.randint(-30, 30)
+        b.x = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, b.x))
+        b.y = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, b.y))
+
+    # give all balls an original team_id for alliance team_id swapping
+    for b in balls:
+        b._inf_original_team_id = b.team_id
+
+    # give survivors personalities so they can form dynamic alliances (like hunger games)
+    for b in survivors:
+        b.hg_original_color = b.color
+        b.hg_personality = random.randint(1, 5)
+        if b.hg_personality == 4:  # Traitorous
+            b.hg_betrayal_timer = random.randint(HG_BETRAYAL_MIN_TIMER, HG_BETRAYAL_MAX_TIMER)
+
+    respawn_queue = []  # (ball, respawn_frame) — infected only
+    frame_count = 0
+    next_alliance_id = 1
+
+    # ── Alliance helpers (same system as Hunger Games) ──
+    # Key difference: followers adopt leader's team_id so ALL existing combat code
+    # automatically treats alliance members as teammates (no projectile/melee changes needed)
+    def form_alliance(leader, follower):
+        nonlocal next_alliance_id
+        if leader.hg_alliance_id is not None:
+            aid = leader.hg_alliance_id
+        else:
+            aid = next_alliance_id
+            next_alliance_id += 1
+            leader.hg_alliance_id = aid
+            leader.hg_is_leader = True
+            leader.hg_leader_ref = None
+        follower.hg_alliance_id = aid
+        follower.hg_is_leader = False
+        follower.hg_leader_ref = leader
+        # follower adopts leader's team_id so all combat checks treat them as allies
+        follower.team_id = leader.team_id
+        sync_alliance_color(aid)
+
+    def leave_alliance(ball):
+        if ball.hg_alliance_id is None:
+            return
+        old_aid = ball.hg_alliance_id
+        ball.hg_alliance_id = None
+        ball.hg_is_leader = False
+        ball.hg_leader_ref = None
+        ball.hg_leader_target = None
+        ball.color = ball.hg_original_color
+        ball.hg_alliance_timer = 300
+        # restore original team_id
+        if hasattr(ball, '_inf_original_team_id'):
+            ball.team_id = ball._inf_original_team_id
+        members = [b for b in balls if b.alive and b.team_id != INFECTION_TEAM_ID and b.hg_alliance_id == old_aid]
+        if len(members) <= 1:
+            for m in members:
+                m.hg_alliance_id = None
+                m.hg_is_leader = False
+                m.hg_leader_ref = None
+                m.hg_leader_target = None
+                m.color = m.hg_original_color
+                if hasattr(m, '_inf_original_team_id'):
+                    m.team_id = m._inf_original_team_id
+
+    def sync_alliance_color(aid):
+        members = [b for b in balls if b.alive and b.hg_alliance_id == aid]
+        leader = None
+        for m in members:
+            if m.hg_is_leader:
+                leader = m
+                break
+        if leader is None:
+            return
+        leader.color = leader.hg_original_color
+        for m in members:
+            if not m.hg_is_leader:
+                m.color = leader.hg_original_color
+
+    def detect_betrayal(victim, attacker_team_id):
+        if victim.hg_alliance_id is None:
+            return
+        # find attacker — need to check original team_ids since alliance members share team_id
+        attacker = None
+        for b in balls:
+            if b._inf_original_team_id == attacker_team_id and b.alive:
+                attacker = b
+                break
+        if attacker is None:
+            # try current team_id
+            for b in balls:
+                if b.team_id == attacker_team_id and b.alive and b is not victim:
+                    attacker = b
+                    break
+        if attacker is None or attacker.hg_alliance_id != victim.hg_alliance_id:
+            return
+        # Kick the traitor from the alliance (don't dissolve the whole thing)
+        old_aid = attacker.hg_alliance_id
+        attacker.hg_alliance_id = None
+        attacker.hg_is_leader = False
+        attacker.hg_leader_ref = None
+        attacker.hg_leader_target = None
+        attacker.color = attacker.hg_original_color
+        attacker.hg_alliance_timer = 600
+        if hasattr(attacker, '_inf_original_team_id'):
+            attacker.team_id = attacker._inf_original_team_id
+        # remaining members remember and target the traitor
+        members = [b for b in balls if b.alive and b.hg_alliance_id == old_aid]
+        for m in members:
+                m.hg_betrayed_by.add(getattr(attacker, '_inf_original_team_id', attacker.team_id))
+                m.hg_leader_target = attacker
+        # if only 1 member left, dissolve the alliance
+        if len(members) <= 1:
+            for m in members:
+                m.hg_alliance_id = None
+                m.hg_is_leader = False
+                m.hg_leader_ref = None
+                m.hg_leader_target = None
+                m.color = m.hg_original_color
+                if hasattr(m, '_inf_original_team_id'):
+                    m.team_id = m._inf_original_team_id
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    infection_mode(team_configs, arena_idx)
+                    return
+                if event.key == pygame.K_m:
+                    return
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                if event.key == pygame.K_1:
+                    speed_index = 0
+                if event.key == pygame.K_2:
+                    speed_index = 1
+                if event.key == pygame.K_3:
+                    speed_index = 2
+                if event.key == pygame.K_4:
+                    speed_index = 3
+
+        game_speed = speed_options[speed_index]
+
+        if winner_text is not None:
+            screen.fill((15, 20, 10))
+            text = big_font.render(winner_text, True, winner_color)
+            r1 = font.render("R = Rematch  |  M = Menu", True, (180, 180, 180))
+            screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 30))
+            screen.blit(r1, (WIDTH // 2 - r1.get_width() // 2, HEIGHT // 2 + 30))
+            pygame.display.flip()
+            clock.tick(60)
+            continue
+
+        for _tick in range(game_speed):
+            if winner_text is not None or paused:
+                break
+
+            frame_count += 1
+            alive_balls = [b for b in balls if b.alive]
+
+            # AI + movement + abilities
+            for b in alive_balls:
+                target = b.find_target(alive_balls)
+                b.seek(target, alive_balls)
+                b.move()
+                b.try_throw_spear(target, spears)
+                b.try_place_trap(target, traps)
+                b.try_drop_bomb(target, bombs)
+                b.try_heal(alive_balls)
+                b.aim_shield(alive_balls)
+                b.try_fire_bullet(target, bullets)
+                b.try_fire_arrow(target, arrows)
+                b.try_cast_orb(target, orbs)
+                b.try_fire_ice_bolt(target, ice_bolts)
+                b.try_place_wall(target, walls, alive_balls)
+                b.try_place_fence(target, fences)
+
+            # fence update & damage
+            for f in fences:
+                if f.alive:
+                    f.update()
+                    for b in alive_balls:
+                        if b.alive:
+                            f.check_damage(b)
+            fences = [f for f in fences if f.alive]
+
+            # summoner spawns minions
+            for b in alive_balls:
+                if b.role != "summoner" or b.summon_cooldown > 0:
+                    continue
+                b.minions = [m for m in b.minions if m.alive]
+                if len(b.minions) >= SUMMONER_MAX_MINIONS:
+                    continue
+                angle = random.uniform(0, 2 * math.pi)
+                mx = b.x + math.cos(angle) * (b.radius * 2.5)
+                my = b.y + math.sin(angle) * (b.radius * 2.5)
+                mx = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, mx))
+                my = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, my))
+                minion = Ball(mx, my, b.color, b.team_id, "zombie")
+                minion.hp = SUMMONER_MINION_HP
+                minion.max_hp = SUMMONER_MINION_HP
+                minion.radius = max(8, int(BALL_RADIUS * SUMMONER_MINION_RADIUS_SCALE))
+                minion.is_minion = True
+                minion._infection_mode = True
+                balls.append(minion)
+                b.minions.append(minion)
+                b.summon_cooldown = SUMMONER_COOLDOWN
+
+            # move spears
+            for s in spears:
+                if s.alive:
+                    s.move()
+
+            # spear hit detection
+            for s in spears:
+                if not s.alive or s.carried_ball is not None:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == s.team_id or b.carried_by_spear:
+                        continue
+                    if dist(s.x, s.y, b.x, b.y) <= b.radius + 5:
+                        if b.role == "mirror":
+                            s.dx = -s.dx
+                            s.dy = -s.dy
+                            s.angle = math.atan2(s.dy, s.dx)
+                            s.team_id = b.team_id
+                            s.x += s.dx * 2
+                            s.y += s.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(s.y - b.y, s.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                s.alive = False
+                                break
+                        b.take_damage(SPEAR_DAMAGE)
+                        b.last_hit_by_team = s.team_id
+                        if b.trapped_in is not None:
+                            b.trapped_in.captured_ball = None
+                            b.trapped_in.alive = False
+                            b.trapped_in = None
+                        b.carried_by_spear = True
+                        b.pinned_timer = 0
+                        b.vx = 0
+                        b.vy = 0
+                        s.carried_ball = b
+                        break
+
+            # trap trigger detection + update
+            for t in traps:
+                if not t.alive:
+                    continue
+                if t.captured_ball is not None:
+                    t.update()
+                    continue
+                for b in alive_balls:
+                    if b.team_id == t.team_id or b.trapped_in is not None or b.carried_by_spear or b.pinned_timer > 0:
+                        continue
+                    if dist(t.x, t.y, b.x, b.y) <= t.radius:
+                        t.captured_ball = b
+                        b.trapped_in = t
+                        angle = random.uniform(0, 2 * math.pi)
+                        b.vx = math.cos(angle) * 4.0
+                        b.vy = math.sin(angle) * 4.0
+                        b.bounce_timer = 0
+                        break
+
+            # move bullets
+            for bl in bullets:
+                if bl.alive:
+                    bl.move()
+
+            # bullet hit detection
+            for bl in bullets:
+                if not bl.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == bl.team_id:
+                        continue
+                    if dist(bl.x, bl.y, b.x, b.y) <= b.radius + 3:
+                        if b.role == "mirror":
+                            bl.dx = -bl.dx
+                            bl.dy = -bl.dy
+                            bl.angle = math.atan2(bl.dy, bl.dx)
+                            bl.team_id = b.team_id
+                            bl.x += bl.dx * 2
+                            bl.y += bl.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(bl.y - b.y, bl.x - b.x)
+                            if b.is_angle_in_shield(angle, attacker_role="sniper"):
+                                bl.alive = False
+                                break
+                        b.take_damage(SNIPER_DAMAGE)
+                        b.last_hit_by_team = bl.team_id
+                        bl.alive = False
+                        ddx = b.x - bl.x
+                        ddy = b.y - bl.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 5.0)
+                        break
+
+            # move arrows
+            for ar in arrows:
+                if ar.alive:
+                    ar.move()
+
+            # arrow hit detection
+            for ar in arrows:
+                if not ar.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == ar.team_id:
+                        continue
+                    if dist(ar.x, ar.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ar.dx = -ar.dx
+                            ar.dy = -ar.dy
+                            ar.angle = math.atan2(ar.dy, ar.dx)
+                            ar.team_id = b.team_id
+                            ar.x += ar.dx * 2
+                            ar.y += ar.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ar.y - b.y, ar.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ar.alive = False
+                                break
+                        b.take_damage(ARCHER_DAMAGE)
+                        b.last_hit_by_team = ar.team_id
+                        ar.alive = False
+                        ddx = b.x - ar.x
+                        ddy = b.y - ar.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 3.0)
+                        break
+
+            # move orbs + hit detection
+            for orb in orbs:
+                if not orb.alive:
+                    continue
+                orb.move()
+                if orb.exploding:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == orb.team_id:
+                        continue
+                    if dist(orb.x, orb.y, b.x, b.y) <= b.radius + 6:
+                        if b.role == "mirror":
+                            orb.dx = -orb.dx
+                            orb.dy = -orb.dy
+                            orb.team_id = b.team_id
+                            orb.x += orb.dx * 2
+                            orb.y += orb.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(orb.y - b.y, orb.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                orb.alive = False
+                                break
+                        b.take_damage(WIZARD_DAMAGE)
+                        b.last_hit_by_team = orb.team_id
+                        orb.exploding = True
+                        for other in alive_balls:
+                            if other is b or other.team_id == orb.team_id:
+                                continue
+                            if dist(orb.x, orb.y, other.x, other.y) <= WIZARD_SPLASH_RADIUS:
+                                other.take_damage(WIZARD_SPLASH_DAMAGE)
+                                other.last_hit_by_team = orb.team_id
+                        break
+
+            # move ice bolts + hit detection
+            for ib in ice_bolts:
+                if not ib.alive:
+                    continue
+                ib.move()
+                for b in alive_balls:
+                    if b.team_id == ib.team_id:
+                        continue
+                    if dist(ib.x, ib.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ib.dx = -ib.dx
+                            ib.dy = -ib.dy
+                            ib.angle = math.atan2(ib.dy, ib.dx)
+                            ib.team_id = b.team_id
+                            ib.x += ib.dx * 2
+                            ib.y += ib.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ib.y - b.y, ib.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ib.alive = False
+                                break
+                        b.take_damage(ICE_MAGE_DAMAGE)
+                        b.last_hit_by_team = ib.team_id
+                        b.slow_timer = ICE_SLOW_DURATION
+                        ib.alive = False
+                        break
+
+            # bomb update + explosion damage
+            for bomb in bombs:
+                if not bomb.alive:
+                    continue
+                was_exploding = bomb.exploding
+                bomb.update()
+                if bomb.exploding and not was_exploding:
+                    for b in alive_balls:
+                        if b.team_id == bomb.team_id:
+                            continue
+                        d = dist(bomb.x, bomb.y, b.x, b.y)
+                        if d <= bomb.explosion_radius:
+                            b.take_damage(BOMB_DAMAGE)
+                            b.last_hit_by_team = bomb.team_id
+                            dx = b.x - bomb.x
+                            dy = b.y - bomb.y
+                            dd = max(d, 0.01)
+                            b.apply_knockback(dx / dd, dy / dd, BOMB_KNOCKBACK)
+
+            # body collisions
+            for i in range(len(alive_balls)):
+                for j in range(i + 1, len(alive_balls)):
+                    a, b = alive_balls[i], alive_balls[j]
+                    if a.team_id == b.team_id:
+                        if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                            resolve_collision(a, b)
+                        continue
+
+                    if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                        if a.role in ("zombie", "conqueror") and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ZOMBIE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 5
+                        if b.role in ("zombie", "conqueror") and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ZOMBIE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 5
+                        if a.role == "berserker" and a.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * a.rage_multiplier)
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(dmg)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 20
+                        if b.role == "berserker" and b.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * b.rage_multiplier)
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(dmg)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 20
+                        if a.role == "shield" and a.hit_cooldown == 0:
+                            b.take_damage(SHIELD_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 10
+                        if b.role == "shield" and b.hit_cooldown == 0:
+                            a.take_damage(SHIELD_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 10
+                        if a.role == "ninja" and a.invisible and a.hit_cooldown == 0:
+                            b.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.invisible = False
+                            a.invis_timer = 0
+                            a.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            a.hit_cooldown = 30
+                        if b.role == "ninja" and b.invisible and b.hit_cooldown == 0:
+                            a.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.invisible = False
+                            b.invis_timer = 0
+                            b.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            b.hit_cooldown = 30
+                        if a.role == "vampire" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(VAMPIRE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                a.hp = min(a.max_hp, a.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            a.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if b.role == "vampire" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(VAMPIRE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                b.hp = min(b.max_hp, b.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            b.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if a.role == "tank" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(TANK_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = TANK_HIT_COOLDOWN
+                        if b.role == "tank" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(TANK_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = TANK_HIT_COOLDOWN
+                        if a.role == "assassin" and a.assassin_dashing > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ASSASSIN_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 30
+                            a.assassin_dashing = 0
+                            a.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = a.x - b.x
+                            ddy = a.y - b.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            a.assassin_retreat_dx = ddx / dd
+                            a.assassin_retreat_dy = ddy / dd
+                            a.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if b.role == "assassin" and b.assassin_dashing > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ASSASSIN_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 30
+                            b.assassin_dashing = 0
+                            b.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = b.x - a.x
+                            ddy = b.y - a.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            b.assassin_retreat_dx = ddx / dd
+                            b.assassin_retreat_dy = ddy / dd
+                            b.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if a.role == "mirror" and a.hit_cooldown == 0:
+                            b.take_damage(MIRROR_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if b.role == "mirror" and b.hit_cooldown == 0:
+                            a.take_damage(MIRROR_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if a.role == "charger" and a.charging > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(CHARGER_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                ddx = b.x - a.x
+                                ddy = b.y - a.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            a.hit_cooldown = 30
+                            a.charging = 0
+                            a.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if b.role == "charger" and b.charging > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(CHARGER_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                ddx = a.x - b.x
+                                ddy = a.y - b.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                a.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            b.hit_cooldown = 30
+                            b.charging = 0
+                            b.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if a.mimic_original and a.mimic_timer <= 0 and b.team_id != a.team_id:
+                            a.role = b.role
+                            a.speed = ROLE_SPEEDS.get(b.role, 3.0)
+                            a.mimic_display_role = b.role
+                            a.mimic_timer = MIMIC_COPY_DURATION
+                        if b.mimic_original and b.mimic_timer <= 0 and a.team_id != b.team_id:
+                            b.role = a.role
+                            b.speed = ROLE_SPEEDS.get(a.role, 3.0)
+                            b.mimic_display_role = a.role
+                            b.mimic_timer = MIMIC_COPY_DURATION
+                        resolve_collision(a, b)
+
+            # sword hits
+            for b in alive_balls:
+                if b.role != "swordsman" or b.hit_cooldown > 0:
+                    continue
+                sbx = b.x + math.cos(b.sword_angle) * b.radius
+                sby = b.y + math.sin(b.sword_angle) * b.radius
+                tx, ty = b.sword_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, sbx, sby, tx, ty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(tx - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = 20
+                                break
+                        other.take_damage(SWORD_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = 20
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, 10.0)
+                        break
+
+            # hammer hits
+            for b in alive_balls:
+                if b.role != "hammer" or b.hit_cooldown > 0:
+                    continue
+                tx, ty = b.hammer_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if dist(other.x, other.y, tx, ty) <= other.radius + HAMMER_HEAD_SIZE:
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                                break
+                        other.take_damage(HAMMER_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, HAMMER_KNOCKBACK)
+                        break
+
+            # chainsaw hits
+            for b in alive_balls:
+                if b.role != "chainsaw" or b.hit_cooldown > 0:
+                    continue
+                cbx = b.x + math.cos(b.chainsaw_angle) * b.radius
+                cby = b.y + math.sin(b.chainsaw_angle) * b.radius
+                ctx, cty = b.chainsaw_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, cbx, cby, ctx, cty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(ctx - other.y, ctx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                continue
+                        other.take_damage(CHAINSAW_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = CHAINSAW_HIT_COOLDOWN
+                        break
+
+            # wall update + ball-wall collisions
+            for w in walls:
+                if not w.alive:
+                    continue
+                w.update()
+                if w.exploding:
+                    if w.explode_frames == 9:
+                        blast_angle = math.atan2(w.blast_dy, w.blast_dx)
+                        spread = math.pi / 3
+                        for b in alive_balls:
+                            if b.team_id == w.team_id:
+                                continue
+                            d = dist(w.x, w.y, b.x, b.y)
+                            if d > FORT_EXPLODE_RADIUS:
+                                continue
+                            angle_to = math.atan2(b.y - w.y, b.x - w.x)
+                            diff = (angle_to - blast_angle + math.pi) % (2 * math.pi) - math.pi
+                            if abs(diff) <= spread:
+                                b.take_damage(FORT_EXPLODE_DAMAGE)
+                                b.last_hit_by_team = w.team_id
+                                ddx = b.x - w.x
+                                ddy = b.y - w.y
+                                dd = max(d, 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 12.0)
+                    continue
+                x1, y1, x2, y2 = w.endpoints()
+                for b in alive_balls:
+                    if b.team_id == w.team_id:
+                        continue
+                    if point_near_segment(b.x, b.y, x1, y1, x2, y2, b.radius + w.thickness // 2):
+                        w.hp -= 1
+                        ddx = b.x - w.x
+                        ddy = b.y - w.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 6.0)
+
+            # ── Alliance formation (survivors only) ──
+            survivor_alive = [b for b in alive_balls if b.team_id != INFECTION_TEAM_ID]
+            for b in survivor_alive:
+                if b.hg_alliance_timer > 0:
+                    b.hg_alliance_timer -= 1
+                if b.hg_personality not in (2, 5):
+                    continue
+                if b.hg_alliance_timer > 0:
+                    continue
+                for other in survivor_alive:
+                    if other is b or not other.alive:
+                        continue
+                    if other.hg_alliance_timer > 0:
+                        continue
+                    if other.hg_alliance_id is not None and b.hg_alliance_id is not None:
+                        continue
+                    if other.hg_alliance_id == b.hg_alliance_id and b.hg_alliance_id is not None:
+                        continue
+                    if dist(b.x, b.y, other.x, other.y) > HG_ALLIANCE_INVITE_RANGE:
+                        continue
+                    if other.hg_personality == 3:
+                        continue
+                    other_orig = getattr(other, '_inf_original_team_id', other.team_id)
+                    b_orig = getattr(b, '_inf_original_team_id', b.team_id)
+                    if other_orig in b.hg_betrayed_by or b_orig in other.hg_betrayed_by:
+                        continue
+                    if other.hg_personality in (1, 2, 4, 5):
+                        form_alliance(b, other)
+
+            # sync alliance colors
+            active_aids = set(b.hg_alliance_id for b in survivor_alive if b.hg_alliance_id is not None)
+            for aid in active_aids:
+                sync_alliance_color(aid)
+
+            # betrayal timer
+            for b in survivor_alive:
+                if b.hg_personality == 4 and b.hg_alliance_id is not None:
+                    if b.hg_betrayal_timer > 0:
+                        b.hg_betrayal_timer -= 1
+
+            # ── death handling (infection logic) ──
+            for b in balls:
+                if b.hp <= 0 and b.alive:
+                    b.alive = False
+                    if getattr(b, 'is_minion', False):
+                        continue  # minions just die
+                    if b.team_id == INFECTION_TEAM_ID:
+                        # infected dies → respawn as infected (infinite respawns)
+                        respawn_queue.append((b, frame_count + INFECTION_RESPAWN_DELAY))
+                    elif b.last_hit_by_team == INFECTION_TEAM_ID:
+                        # leave alliance before converting
+                        leave_alliance(b)
+                        # survivor killed by infected → convert to infected zombie
+                        b.team_id = INFECTION_TEAM_ID
+                        b.color = INFECTION_COLOR
+                        b.role = "zombie"
+                        b.speed = ROLE_SPEEDS.get("zombie", 3.5)
+                        b.hp = 100
+                        b.max_hp = 100
+                        b.mimic_original = False
+                        b.mimic_timer = 0
+                        # clear assigned post so they roam freely as infected
+                        b.assigned_x = None
+                        b.assigned_y = None
+                        b.position_leash = 150.0
+                        b.defend_ball = None
+                        respawn_queue.append((b, frame_count + INFECTION_RESPAWN_DELAY))
+                    # else: survivor killed by survivor → permanent death (no respawn)
+
+            # process respawn queue
+            for entry in respawn_queue[:]:
+                b, respawn_frame = entry
+                if frame_count >= respawn_frame:
+                    respawn_queue.remove(entry)
+                    edge = random.choice(["top", "bottom", "left", "right"])
+                    margin = BALL_RADIUS + 10
+                    if edge == "top":
+                        b.x = random.randint(margin, WIDTH - margin)
+                        b.y = margin
+                    elif edge == "bottom":
+                        b.x = random.randint(margin, WIDTH - margin)
+                        b.y = HEIGHT - margin
+                    elif edge == "left":
+                        b.x = margin
+                        b.y = random.randint(margin, HEIGHT - margin)
+                    else:
+                        b.x = WIDTH - margin
+                        b.y = random.randint(margin, HEIGHT - margin)
+                    b.alive = True
+                    b.hp = b.max_hp
+                    b.vx = 0
+                    b.vy = 0
+                    b.bounce_timer = 0
+                    b.pinned_timer = 0
+                    b.carried_by_spear = False
+                    b.trapped_in = None
+                    b.hit_cooldown = 0
+                    b.last_hit_by_team = None
+
+            # clean up dead projectiles
+            spears = [s for s in spears if s.alive]
+            traps = [t for t in traps if t.alive]
+            bombs = [bm for bm in bombs if bm.alive]
+            bullets = [bl for bl in bullets if bl.alive]
+            arrows = [ar for ar in arrows if ar.alive]
+            orbs = [orb for orb in orbs if orb.alive]
+            ice_bolts = [ib for ib in ice_bolts if ib.alive]
+            walls = [w for w in walls if w.alive]
+
+            # ── win condition check ──
+            alive_survivors = [b for b in balls if b.alive and b.team_id != INFECTION_TEAM_ID]
+            alive_infected = [b for b in balls if b.alive and b.team_id == INFECTION_TEAM_ID]
+            pending_infected = len(respawn_queue)  # infected waiting to respawn
+
+            if not alive_survivors:
+                winner_text = "Infected Win!"
+                winner_color = INFECTION_COLOR
+            elif len(alive_survivors) == 1:
+                # last survivor standing wins
+                s = alive_survivors[0]
+                tid = s.team_id
+                winner_text = f"Ball {tid + 1} Wins!"
+                winner_color = TEAM_COLORS[tid % len(TEAM_COLORS)]
+            elif alive_survivors and not alive_infected and pending_infected == 0:
+                # all infected dead — survivors win (unlikely)
+                winner_text = "Survivors Win!"
+                winner_color = (255, 255, 255)
+
+        # ── draw ──
+        screen.fill((15, 20, 10))  # dark greenish background for infection theme
+
+        # draw traps, bombs, walls, fences first (under balls)
+        for w in walls:
+            w.draw(screen)
+        for f in fences:
+            f.draw(screen)
+        for t in traps:
+            t.draw(screen)
+        for bm in bombs:
+            bm.draw(screen)
+
+        # draw balls with infected glow
+        for b in balls:
+            if b.alive:
+                if b.team_id == INFECTION_TEAM_ID:
+                    # green glow aura for infected
+                    glow_surf = pygame.Surface((b.radius * 4, b.radius * 4), pygame.SRCALPHA)
+                    pulse = int(20 * math.sin(frame_count * 0.08))
+                    pygame.draw.circle(glow_surf, (100, 200, 50, 30 + pulse),
+                                       (b.radius * 2, b.radius * 2), b.radius * 2)
+                    screen.blit(glow_surf, (int(b.x) - b.radius * 2, int(b.y) - b.radius * 2))
+                b.draw(screen)
+
+        # draw spears and projectiles on top
+        for s in spears:
+            s.draw(screen)
+        for bl in bullets:
+            bl.draw(screen)
+        for ar in arrows:
+            ar.draw(screen)
+        for orb in orbs:
+            orb.draw(screen)
+        for ib in ice_bolts:
+            ib.draw(screen)
+
+        # draw respawn indicators at edges
+        for entry in respawn_queue:
+            b, respawn_frame = entry
+            frames_left = respawn_frame - frame_count
+            if frames_left > 0:
+                secs = frames_left / 60.0
+                color = INFECTION_COLOR if b.team_id == INFECTION_TEAM_ID else TEAM_COLORS[b.team_id % len(TEAM_COLORS)]
+                dim_color = (color[0] // 3, color[1] // 3, color[2] // 3)
+                pygame.draw.circle(screen, dim_color, (int(b.x), int(b.y)), b.radius // 2)
+                timer_text = small_font.render(f"{secs:.1f}s", True, color)
+                screen.blit(timer_text, (int(b.x) - timer_text.get_width() // 2,
+                                         int(b.y) - b.radius - 10))
+
+        # ── HUD ──
+        alive_survivors = [b for b in balls if b.alive and b.team_id != INFECTION_TEAM_ID]
+        alive_infected = [b for b in balls if b.alive and b.team_id == INFECTION_TEAM_ID]
+
+        # survivor count
+        surv_label = font.render(f"Survivors: {len(alive_survivors)}", True, (200, 200, 255))
+        screen.blit(surv_label, (10, 8))
+
+        # infected count
+        inf_label = font.render(f"Infected: {len(alive_infected)}", True, INFECTION_COLOR)
+        screen.blit(inf_label, (10, 30))
+
+        # survivor count warning
+        if len(alive_survivors) <= 3 and len(alive_survivors) > 0:
+            warn_msg = font.render(f"{len(alive_survivors)} survivor{'s' if len(alive_survivors) > 1 else ''} left!", True, (255, 200, 50))
+            screen.blit(warn_msg, (WIDTH // 2 - warn_msg.get_width() // 2, 60))
+
+        # speed indicator
+        if paused:
+            speed_text = font.render("PAUSED  (Space)", True, (255, 255, 100))
+        else:
+            speed_text = font.render(f"Speed: {game_speed}x  (1/2/3/4)", True, (180, 180, 180))
+        screen.blit(speed_text, (WIDTH - speed_text.get_width() - 10, 8))
+
+        # mode label
+        mode_label = small_font.render("INFECTION", True, INFECTION_COLOR)
+        screen.blit(mode_label, (WIDTH - mode_label.get_width() - 10, 28))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
+def hunger_games_mode(team_configs, arena_idx=0):
+    global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
+    total_balls = len(team_configs)
+
+    aw, ah, a_hint = ARENA_SIZES[arena_idx]
+    WIDTH = aw
+    HEIGHT = ah
+
+    if total_balls > 6:
+        BALL_RADIUS = max(12, BASE_BALL_RADIUS - (total_balls - 6) * 2)
+    else:
+        BALL_RADIUS = BASE_BALL_RADIUS
+    SWORD_LENGTH = BALL_RADIUS * 2
+    TRAP_RADIUS = BALL_RADIUS * 4
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+    cx, cy = WIDTH // 2, HEIGHT // 2
+    spawn_radius = min(WIDTH, HEIGHT) * 0.35
+
+    # Spawn all balls as zombies in a circle around the center
+    balls = []
+    for idx, cfg in enumerate(team_configs):
+        angle = (2 * math.pi * idx) / total_balls
+        bx = cx + math.cos(angle) * spawn_radius
+        by = cy + math.sin(angle) * spawn_radius
+        bx = max(BALL_RADIUS + 5, min(WIDTH - BALL_RADIUS - 5, bx))
+        by = max(BALL_RADIUS + 5, min(HEIGHT - BALL_RADIUS - 5, by))
+        ffa_color = HG_FFA_COLORS[idx % len(HG_FFA_COLORS)]
+        b = Ball(bx, by, ffa_color, cfg["team_id"], "zombie")
+        b._hunger_games_mode = True
+        b.hg_original_color = ffa_color
+        b.hg_personality = random.randint(1, 5)
+        # Build role preferences: shuffle top roles, healer/necro always last
+        prefs = list(HG_BASE_ROLE_RANKING)
+        shuffle_end = len(prefs) - 2  # last 2 are healer, necromancer
+        for _ in range(random.randint(3, 8)):
+            i1 = random.randint(0, shuffle_end - 1)
+            i2 = random.randint(0, shuffle_end - 1)
+            prefs[i1], prefs[i2] = prefs[i2], prefs[i1]
+        b.hg_role_prefs = prefs
+        if b.hg_personality == 4:  # Traitorous
+            b.hg_betrayal_timer = random.randint(HG_BETRAYAL_MIN_TIMER, HG_BETRAYAL_MAX_TIMER)
+        balls.append(b)
+
+    # Spawn 25 power-ups in the center area (one per non-zombie role)
+    non_zombie_roles = [r for r in ROLES if r != "zombie"]
+    powerups = []
+    for role in non_zombie_roles:
+        for _attempt in range(50):
+            px = cx + random.randint(-int(spawn_radius * 0.5), int(spawn_radius * 0.5))
+            py = cy + random.randint(-int(spawn_radius * 0.5), int(spawn_radius * 0.5))
+            px = max(HG_POWERUP_RADIUS + 5, min(WIDTH - HG_POWERUP_RADIUS - 5, px))
+            py = max(HG_POWERUP_RADIUS + 5, min(HEIGHT - HG_POWERUP_RADIUS - 5, py))
+            ok = all(dist(px, py, p.x, p.y) > HG_POWERUP_RADIUS * 3 for p in powerups)
+            if ok:
+                break
+        powerups.append(PowerUp(px, py, role))
+
+    spears = []
+    traps = []
+    bombs = []
+    bullets = []
+    arrows = []
+    orbs = []
+    ice_bolts = []
+    walls = []
+    fences = []
+    winner_text = None
+    winner_color = (255, 255, 255)
+    speed_options = [1, 2, 4, 10]
+    speed_index = 0
+    paused = False
+    frame_count = 0
+    next_alliance_id = 1
+    powerup_respawn_timer = 0
+    stalemate_timer = 0          # frames without damage
+    stalemate_countdown = 0      # forced fight countdown (frames)
+    STALEMATE_DETECT = 600       # 10 sec no damage → start countdown
+    STALEMATE_COUNTDOWN = 300    # 5 sec countdown before forced fight
+    last_total_hp = sum(b.hp for b in balls)
+
+    # ── Alliance helpers ──
+    def form_alliance(leader, follower):
+        nonlocal next_alliance_id
+        if leader.hg_alliance_id is not None:
+            aid = leader.hg_alliance_id
+        else:
+            aid = next_alliance_id
+            next_alliance_id += 1
+            leader.hg_alliance_id = aid
+            leader.hg_is_leader = True
+            leader.hg_leader_ref = None
+        follower.hg_alliance_id = aid
+        follower.hg_is_leader = False
+        follower.hg_leader_ref = leader
+        sync_alliance_color(aid)
+
+    def leave_alliance(ball):
+        if ball.hg_alliance_id is None:
+            return
+        old_aid = ball.hg_alliance_id
+        ball.hg_alliance_id = None
+        ball.hg_is_leader = False
+        ball.hg_leader_ref = None
+        ball.hg_leader_target = None
+        ball.color = ball.hg_original_color
+        ball.hg_alliance_timer = 300  # 5 sec cooldown
+        # Check if alliance still has members
+        members = [b for b in balls if b.alive and b.hg_alliance_id == old_aid]
+        if len(members) <= 1:
+            # Dissolve
+            for m in members:
+                m.hg_alliance_id = None
+                m.hg_is_leader = False
+                m.hg_leader_ref = None
+                m.hg_leader_target = None
+                m.color = m.hg_original_color
+
+    def sync_alliance_color(aid):
+        members = [b for b in balls if b.alive and b.hg_alliance_id == aid]
+        leader = None
+        for m in members:
+            if m.hg_is_leader:
+                leader = m
+                break
+        if leader is None:
+            return
+        leader.color = leader.hg_original_color
+        for m in members:
+            if not m.hg_is_leader:
+                m.color = leader.hg_original_color
+
+    def detect_betrayal(victim, attacker_team_id):
+        """When an alliance member is hit by another alliance member, dissolve
+        the alliance and make the victim retaliate."""
+        if victim.hg_alliance_id is None:
+            return
+        attacker = None
+        for b in balls:
+            if b.team_id == attacker_team_id and b.alive:
+                attacker = b
+                break
+        if attacker is None or attacker.hg_alliance_id != victim.hg_alliance_id:
+            return
+        # Kick the traitor from the alliance (don't dissolve the whole thing)
+        old_aid = attacker.hg_alliance_id
+        attacker.hg_alliance_id = None
+        attacker.hg_is_leader = False
+        attacker.hg_leader_ref = None
+        attacker.hg_leader_target = None
+        attacker.color = attacker.hg_original_color
+        attacker.hg_alliance_timer = 600  # long cooldown after betrayal
+        # remaining members remember and target the traitor
+        members = [b for b in balls if b.alive and b.hg_alliance_id == old_aid]
+        for m in members:
+            m.hg_betrayed_by.add(attacker.team_id)
+            m.hg_leader_target = attacker
+        # if only 1 member left, dissolve the alliance
+        if len(members) <= 1:
+            for m in members:
+                m.hg_alliance_id = None
+                m.hg_is_leader = False
+                m.hg_leader_ref = None
+                m.hg_leader_target = None
+                m.color = m.hg_original_color
+
+    def hg_find_target(ball, alive_balls):
+        """Personality-driven targeting."""
+        personality = ball.hg_personality
+        aid = ball.hg_alliance_id
+        enemies = [b for b in alive_balls if b is not ball and b.alive
+                   and not (b.role == "ninja" and b.invisible)]
+        # Filter out alliance members (unless betraying)
+        if aid is not None and not (personality == 4 and ball.hg_betrayal_timer <= 0):
+            enemies = [b for b in enemies if b.hg_alliance_id != aid]
+        if not enemies:
+            return None
+
+        # All alliance members: follow leader's orders first
+        if aid is not None and ball.hg_leader_target is not None and ball.hg_leader_target.alive:
+            if ball.hg_leader_target in enemies:
+                return ball.hg_leader_target
+
+        # 1 = Scared
+        if personality == 1:
+            alive_count = len(alive_balls)
+            hp_pct = ball.hp / max(ball.max_hp, 1)
+            if hp_pct > 0.3 and alive_count > 3:
+                return None  # flee mode
+            return min(enemies, key=lambda b: dist(ball.x, ball.y, b.x, b.y))
+
+        # 2 = Friendly
+        if personality == 2:
+            if aid is None:
+                return None  # seek alliance instead
+            return min(enemies, key=lambda b: dist(ball.x, ball.y, b.x, b.y))
+
+        # 3 = Aggressive
+        if personality == 3:
+            return min(enemies, key=lambda b: dist(ball.x, ball.y, b.x, b.y))
+
+        # 4 = Traitorous
+        if personality == 4:
+            if ball.hg_betrayal_timer <= 0 and aid is not None:
+                # Target alliance members!
+                allies = [b for b in alive_balls if b is not ball and b.alive
+                          and b.hg_alliance_id == aid]
+                if allies:
+                    return min(allies, key=lambda b: dist(ball.x, ball.y, b.x, b.y))
+            return min(enemies, key=lambda b: dist(ball.x, ball.y, b.x, b.y))
+
+        # 5 = Leader
+        if personality == 5:
+            return min(enemies, key=lambda b: dist(ball.x, ball.y, b.x, b.y))
+
+        return min(enemies, key=lambda b: dist(ball.x, ball.y, b.x, b.y))
+
+    def hg_seek_override(ball, alive_balls):
+        """Personality-driven movement overrides. Returns True if handled."""
+        personality = ball.hg_personality
+
+        # Zombies/healers/necromancers rush toward power-ups even during bounce (override knockback)
+        if ball.role in ("zombie", "healer", "necromancer") and not ball.carried_by_spear and ball.trapped_in is None and ball.pinned_timer <= 0:
+            alive_pups = [p for p in powerups if p.alive]
+            if alive_pups:
+                best = None
+                best_rank = 999
+                for p in alive_pups:
+                    if p.role in ball.hg_role_prefs:
+                        rank = ball.hg_role_prefs.index(p.role)
+                        if rank < best_rank:
+                            best_rank = rank
+                            best = p
+                if best is None:
+                    best = min(alive_pups, key=lambda p: dist(ball.x, ball.y, p.x, p.y))
+                dx = best.x - ball.x
+                dy = best.y - ball.y
+                d = max(math.sqrt(dx * dx + dy * dy), 0.01)
+                ball.vx = (dx / d) * ball.speed
+                ball.vy = (dy / d) * ball.speed
+                ball.bounce_timer = 0  # cancel bounce to keep moving
+                return True
+
+        if ball.bounce_timer > 0 or ball.pinned_timer > 0 or ball.carried_by_spear or ball.trapped_in is not None:
+            return False
+
+        # Scared: flee nearest enemy
+        if personality == 1:
+            alive_count = len(alive_balls)
+            hp_pct = ball.hp / max(ball.max_hp, 1)
+            if hp_pct > 0.3 and alive_count > 3:
+                enemies = [b for b in alive_balls if b is not ball and b.alive
+                           and (ball.hg_alliance_id is None or b.hg_alliance_id != ball.hg_alliance_id)]
+                if enemies:
+                    nearest = min(enemies, key=lambda b: dist(ball.x, ball.y, b.x, b.y))
+                    d = dist(ball.x, ball.y, nearest.x, nearest.y)
+                    if d < HG_SCARED_FLEE_RANGE:
+                        dx = ball.x - nearest.x
+                        dy = ball.y - nearest.y
+                        dd = max(d, 0.01)
+                        ball.vx = (dx / dd) * ball.speed
+                        ball.vy = (dy / dd) * ball.speed
+                        return True
+
+        # Friendly without alliance: move toward potential ally
+        if personality == 2 and ball.hg_alliance_id is None and ball.hg_alliance_timer <= 0:
+            potential = [b for b in alive_balls if b is not ball and b.alive
+                         and b.hg_alliance_id is None
+                         and b.hg_personality in (1, 2, 4, 5)]
+            if potential:
+                nearest = min(potential, key=lambda b: dist(ball.x, ball.y, b.x, b.y))
+                dx = nearest.x - ball.x
+                dy = nearest.y - ball.y
+                d = max(math.sqrt(dx * dx + dy * dy), 0.01)
+                ball.vx = (dx / d) * ball.speed
+                ball.vy = (dy / d) * ball.speed
+                return True
+
+        return False
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    hunger_games_mode(team_configs, arena_idx)
+                    return
+                if event.key == pygame.K_m:
+                    return
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                if event.key == pygame.K_1:
+                    speed_index = 0
+                if event.key == pygame.K_2:
+                    speed_index = 1
+                if event.key == pygame.K_3:
+                    speed_index = 2
+                if event.key == pygame.K_4:
+                    speed_index = 3
+
+        game_speed = speed_options[speed_index]
+
+        if winner_text is not None:
+            screen.fill((10, 10, 15))
+            text = big_font.render(winner_text, True, winner_color)
+            r1 = font.render("R = Rematch  |  M = Menu", True, (180, 180, 180))
+            screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 30))
+            screen.blit(r1, (WIDTH // 2 - r1.get_width() // 2, HEIGHT // 2 + 30))
+            pygame.display.flip()
+            clock.tick(60)
+            continue
+
+        for _tick in range(game_speed):
+            if winner_text is not None or paused:
+                break
+
+            frame_count += 1
+            alive_balls = [b for b in balls if b.alive]
+
+            # ── Power-up pickup ──
+            for b in alive_balls:
+                for p in powerups:
+                    if not p.alive:
+                        continue
+                    if dist(b.x, b.y, p.x, p.y) <= HG_PICKUP_DIST:
+                        if b.role in ("zombie", "healer", "necromancer"):
+                            # Zombies/healers/necromancers always pick up (they need a combat role)
+                            p.alive = False
+                            b.role = p.role
+                            b.speed = ROLE_SPEEDS.get(p.role, 3.0)
+                            if p.role == "tank":
+                                b.hp = TANK_HP
+                                b.max_hp = TANK_HP
+                        else:
+                            # Non-zombies only pick up if role ranks higher in prefs
+                            cur_rank = b.hg_role_prefs.index(b.role) if b.role in b.hg_role_prefs else 999
+                            new_rank = b.hg_role_prefs.index(p.role) if p.role in b.hg_role_prefs else 999
+                            if new_rank < cur_rank:
+                                p.alive = False
+                                b.role = p.role
+                                b.speed = ROLE_SPEEDS.get(p.role, 3.0)
+                                if p.role == "tank":
+                                    b.hp = max(b.hp, TANK_HP)
+                                    b.max_hp = TANK_HP
+
+            # ── Power-up respawn ──
+            alive_pups = [p for p in powerups if p.alive]
+            if len(alive_pups) < 5:
+                powerup_respawn_timer += 1
+                if powerup_respawn_timer >= HG_POWERUP_RESPAWN_TIME:
+                    powerup_respawn_timer = 0
+                    role = random.choice(non_zombie_roles)
+                    px = cx + random.randint(-int(spawn_radius * 0.4), int(spawn_radius * 0.4))
+                    py = cy + random.randint(-int(spawn_radius * 0.4), int(spawn_radius * 0.4))
+                    px = max(HG_POWERUP_RADIUS + 5, min(WIDTH - HG_POWERUP_RADIUS - 5, px))
+                    py = max(HG_POWERUP_RADIUS + 5, min(HEIGHT - HG_POWERUP_RADIUS - 5, py))
+                    powerups.append(PowerUp(px, py, role))
+            else:
+                powerup_respawn_timer = 0
+
+            # ── Alliance formation ──
+            for b in alive_balls:
+                if b.hg_alliance_timer > 0:
+                    b.hg_alliance_timer -= 1
+                if b.hg_personality not in (2, 5):
+                    continue  # Only Friendly and Leaderly initiate
+                if b.hg_alliance_timer > 0:
+                    continue
+                for other in alive_balls:
+                    if other is b or not other.alive:
+                        continue
+                    if other.hg_alliance_timer > 0:
+                        continue
+                    if other.hg_alliance_id is not None and b.hg_alliance_id is not None:
+                        continue  # Both already allied
+                    if other.hg_alliance_id == b.hg_alliance_id and b.hg_alliance_id is not None:
+                        continue  # Same alliance
+                    if dist(b.x, b.y, other.x, other.y) > HG_ALLIANCE_INVITE_RANGE:
+                        continue
+                    # Aggressive refuses
+                    if other.hg_personality == 3:
+                        continue
+                    # Refuse to ally with known betrayers
+                    if other.team_id in b.hg_betrayed_by or b.team_id in other.hg_betrayed_by:
+                        continue
+                    # Scared, Friendly, Traitorous, Leaderly accept
+                    if other.hg_personality in (1, 2, 4, 5):
+                        form_alliance(b, other)
+
+            # ── Sync alliance colors every tick ──
+            active_aids = set(b.hg_alliance_id for b in alive_balls if b.hg_alliance_id is not None)
+            for aid in active_aids:
+                sync_alliance_color(aid)
+
+            # ── Betrayal timer ──
+            for b in alive_balls:
+                if b.hg_personality == 4 and b.hg_alliance_id is not None:
+                    if b.hg_betrayal_timer > 0:
+                        b.hg_betrayal_timer -= 1
+
+            # ── Leader orders ──
+            for b in alive_balls:
+                if not b.hg_is_leader or b.hg_alliance_id is None:
+                    continue
+                members = [m for m in alive_balls if m.hg_alliance_id == b.hg_alliance_id and m is not b]
+                # If someone attacked the leader, all members retaliate
+                if b.last_hit_by_team is not None and b.hp < getattr(b, '_hg_prev_hp', b.hp):
+                    attacker = None
+                    for ab in alive_balls:
+                        if ab.team_id == b.last_hit_by_team and ab.alive and ab.hg_alliance_id != b.hg_alliance_id:
+                            attacker = ab
+                            break
+                    if attacker is not None:
+                        for m in members:
+                            m.hg_leader_target = attacker
+                        continue
+                # Otherwise share leader's own target
+                target = hg_find_target(b, alive_balls)
+                if target is not None:
+                    for m in members:
+                        m.hg_leader_target = target
+
+            # ── AI + movement + abilities ──
+            for b in alive_balls:
+                if not hg_seek_override(b, alive_balls):
+                    target = hg_find_target(b, alive_balls)
+                    b.seek(target, alive_balls)
+                else:
+                    target = hg_find_target(b, alive_balls)
+                b.move()
+                b.try_throw_spear(target, spears)
+                b.try_place_trap(target, traps)
+                b.try_drop_bomb(target, bombs)
+                b.try_heal(alive_balls)
+                b.aim_shield(alive_balls)
+                b.try_fire_bullet(target, bullets)
+                b.try_fire_arrow(target, arrows)
+                b.try_cast_orb(target, orbs)
+                b.try_fire_ice_bolt(target, ice_bolts)
+                b.try_place_wall(target, walls, alive_balls)
+                b.try_place_fence(target, fences)
+
+            # ── fence update & damage ──
+            for f in fences:
+                if f.alive:
+                    f.update()
+                    for b in alive_balls:
+                        if b.alive:
+                            if f.check_damage(b):
+                                b.last_hit_by_team = f.team_id
+            fences = [f for f in fences if f.alive]
+
+            # summoner spawns minions
+            for b in alive_balls:
+                if b.role != "summoner" or b.summon_cooldown > 0:
+                    continue
+                b.minions = [m for m in b.minions if m.alive]
+                if len(b.minions) >= SUMMONER_MAX_MINIONS:
+                    continue
+                angle = random.uniform(0, 2 * math.pi)
+                mx = b.x + math.cos(angle) * (b.radius * 2.5)
+                my = b.y + math.sin(angle) * (b.radius * 2.5)
+                mx = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, mx))
+                my = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, my))
+                minion = Ball(mx, my, b.color, b.team_id, "zombie")
+                minion.hp = SUMMONER_MINION_HP
+                minion.max_hp = SUMMONER_MINION_HP
+                minion.radius = max(8, int(BALL_RADIUS * SUMMONER_MINION_RADIUS_SCALE))
+                minion.is_minion = True
+                minion._hunger_games_mode = True
+                minion.hg_personality = b.hg_personality
+                minion.hg_original_color = b.hg_original_color
+                minion.hg_alliance_id = b.hg_alliance_id
+                balls.append(minion)
+                b.minions.append(minion)
+                b.summon_cooldown = SUMMONER_COOLDOWN
+
+            # ── move spears ──
+            for s in spears:
+                if s.alive:
+                    s.move()
+
+            # spear hit detection
+            for s in spears:
+                if not s.alive or s.carried_ball is not None:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == s.team_id or b.carried_by_spear:
+                        continue
+                    # Alliance check
+                    if b.hg_alliance_id is not None:
+                        thrower = None
+                        for tb in alive_balls:
+                            if tb.team_id == s.team_id:
+                                thrower = tb
+                                break
+                        if thrower and thrower.hg_alliance_id == b.hg_alliance_id:
+                            continue
+                    if dist(s.x, s.y, b.x, b.y) <= b.radius + 5:
+                        if b.role == "mirror":
+                            s.dx = -s.dx
+                            s.dy = -s.dy
+                            s.angle = math.atan2(s.dy, s.dx)
+                            s.team_id = b.team_id
+                            s.x += s.dx * 2
+                            s.y += s.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(s.y - b.y, s.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                s.alive = False
+                                break
+                        b.take_damage(SPEAR_DAMAGE)
+                        b.last_hit_by_team = s.team_id
+                        if b.trapped_in is not None:
+                            b.trapped_in.captured_ball = None
+                            b.trapped_in.alive = False
+                            b.trapped_in = None
+                        b.carried_by_spear = True
+                        b.pinned_timer = 0
+                        b.vx = 0
+                        b.vy = 0
+                        s.carried_ball = b
+                        break
+
+            # trap trigger detection + update
+            for t in traps:
+                if not t.alive:
+                    continue
+                if t.captured_ball is not None:
+                    t.update()
+                    continue
+                for b in alive_balls:
+                    if b.team_id == t.team_id or b.trapped_in is not None or b.carried_by_spear or b.pinned_timer > 0:
+                        continue
+                    if dist(t.x, t.y, b.x, b.y) <= t.radius:
+                        t.captured_ball = b
+                        b.trapped_in = t
+                        angle = random.uniform(0, 2 * math.pi)
+                        b.vx = math.cos(angle) * 4.0
+                        b.vy = math.sin(angle) * 4.0
+                        b.bounce_timer = 0
+                        break
+
+            # move bullets
+            for bl in bullets:
+                if bl.alive:
+                    bl.move()
+
+            # bullet hit detection
+            for bl in bullets:
+                if not bl.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == bl.team_id:
+                        continue
+                    if dist(bl.x, bl.y, b.x, b.y) <= b.radius + 3:
+                        if b.role == "mirror":
+                            bl.dx = -bl.dx
+                            bl.dy = -bl.dy
+                            bl.angle = math.atan2(bl.dy, bl.dx)
+                            bl.team_id = b.team_id
+                            bl.x += bl.dx * 2
+                            bl.y += bl.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(bl.y - b.y, bl.x - b.x)
+                            if b.is_angle_in_shield(angle, attacker_role="sniper"):
+                                bl.alive = False
+                                break
+                        b.take_damage(SNIPER_DAMAGE)
+                        b.last_hit_by_team = bl.team_id
+                        bl.alive = False
+                        ddx = b.x - bl.x
+                        ddy = b.y - bl.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 5.0)
+                        break
+
+            # move arrows
+            for ar in arrows:
+                if ar.alive:
+                    ar.move()
+
+            # arrow hit detection
+            for ar in arrows:
+                if not ar.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == ar.team_id:
+                        continue
+                    if dist(ar.x, ar.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ar.dx = -ar.dx
+                            ar.dy = -ar.dy
+                            ar.angle = math.atan2(ar.dy, ar.dx)
+                            ar.team_id = b.team_id
+                            ar.x += ar.dx * 2
+                            ar.y += ar.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ar.y - b.y, ar.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ar.alive = False
+                                break
+                        b.take_damage(ARCHER_DAMAGE)
+                        b.last_hit_by_team = ar.team_id
+                        ar.alive = False
+                        ddx = b.x - ar.x
+                        ddy = b.y - ar.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 3.0)
+                        break
+
+            # move orbs + hit detection
+            for orb in orbs:
+                if not orb.alive:
+                    continue
+                orb.move()
+                if orb.exploding:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == orb.team_id:
+                        continue
+                    if dist(orb.x, orb.y, b.x, b.y) <= b.radius + 6:
+                        if b.role == "mirror":
+                            orb.dx = -orb.dx
+                            orb.dy = -orb.dy
+                            orb.team_id = b.team_id
+                            orb.x += orb.dx * 2
+                            orb.y += orb.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(orb.y - b.y, orb.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                orb.alive = False
+                                break
+                        b.take_damage(WIZARD_DAMAGE)
+                        b.last_hit_by_team = orb.team_id
+                        orb.exploding = True
+                        for other in alive_balls:
+                            if other is b or other.team_id == orb.team_id:
+                                continue
+                            if dist(orb.x, orb.y, other.x, other.y) <= WIZARD_SPLASH_RADIUS:
+                                other.take_damage(WIZARD_SPLASH_DAMAGE)
+                                other.last_hit_by_team = orb.team_id
+                        break
+
+            # move ice bolts + hit detection
+            for ib in ice_bolts:
+                if not ib.alive:
+                    continue
+                ib.move()
+                for b in alive_balls:
+                    if b.team_id == ib.team_id:
+                        continue
+                    if dist(ib.x, ib.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ib.dx = -ib.dx
+                            ib.dy = -ib.dy
+                            ib.angle = math.atan2(ib.dy, ib.dx)
+                            ib.team_id = b.team_id
+                            ib.x += ib.dx * 2
+                            ib.y += ib.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ib.y - b.y, ib.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ib.alive = False
+                                break
+                        b.take_damage(ICE_MAGE_DAMAGE)
+                        b.last_hit_by_team = ib.team_id
+                        b.slow_timer = ICE_SLOW_DURATION
+                        ib.alive = False
+                        break
+
+            # bomb update + explosion damage
+            for bomb in bombs:
+                if not bomb.alive:
+                    continue
+                was_exploding = bomb.exploding
+                bomb.update()
+                if bomb.exploding and not was_exploding:
+                    for b in alive_balls:
+                        if b.team_id == bomb.team_id:
+                            continue
+                        d = dist(bomb.x, bomb.y, b.x, b.y)
+                        if d <= bomb.explosion_radius:
+                            b.take_damage(BOMB_DAMAGE)
+                            b.last_hit_by_team = bomb.team_id
+                            dx = b.x - bomb.x
+                            dy = b.y - bomb.y
+                            dd = max(d, 0.01)
+                            b.apply_knockback(dx / dd, dy / dd, BOMB_KNOCKBACK)
+
+            # body collisions
+            for i in range(len(alive_balls)):
+                for j in range(i + 1, len(alive_balls)):
+                    a, b = alive_balls[i], alive_balls[j]
+                    # Alliance members don't fight each other
+                    same_alliance = (a.hg_alliance_id is not None
+                                     and a.hg_alliance_id == b.hg_alliance_id)
+                    if a.team_id == b.team_id:
+                        if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                            resolve_collision(a, b)
+                        continue
+
+                    if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                        # Skip damage if same alliance (unless betraying)
+                        a_betraying = (a.hg_personality == 4 and a.hg_betrayal_timer <= 0
+                                       and a.hg_alliance_id is not None)
+                        b_betraying = (b.hg_personality == 4 and b.hg_betrayal_timer <= 0
+                                       and b.hg_alliance_id is not None)
+
+                        if same_alliance and not a_betraying and not b_betraying:
+                            resolve_collision(a, b)
+                            continue
+
+                        if a.role in ("zombie", "conqueror") and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ZOMBIE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 5
+                        if b.role in ("zombie", "conqueror") and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ZOMBIE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 5
+                        if a.role == "berserker" and a.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * a.rage_multiplier)
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(dmg)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 20
+                        if b.role == "berserker" and b.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * b.rage_multiplier)
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(dmg)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 20
+                        if a.role == "shield" and a.hit_cooldown == 0:
+                            b.take_damage(SHIELD_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 10
+                        if b.role == "shield" and b.hit_cooldown == 0:
+                            a.take_damage(SHIELD_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 10
+                        if a.role == "ninja" and a.invisible and a.hit_cooldown == 0:
+                            b.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.invisible = False
+                            a.invis_timer = 0
+                            a.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            a.hit_cooldown = 30
+                        if b.role == "ninja" and b.invisible and b.hit_cooldown == 0:
+                            a.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.invisible = False
+                            b.invis_timer = 0
+                            b.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            b.hit_cooldown = 30
+                        if a.role == "vampire" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(VAMPIRE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                a.hp = min(a.max_hp, a.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            a.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if b.role == "vampire" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(VAMPIRE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                b.hp = min(b.max_hp, b.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            b.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if a.role == "tank" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(TANK_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = TANK_HIT_COOLDOWN
+                        if b.role == "tank" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(TANK_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = TANK_HIT_COOLDOWN
+                        if a.role == "assassin" and a.assassin_dashing > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ASSASSIN_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 30
+                            a.assassin_dashing = 0
+                            a.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = a.x - b.x
+                            ddy = a.y - b.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            a.assassin_retreat_dx = ddx / dd
+                            a.assassin_retreat_dy = ddy / dd
+                            a.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if b.role == "assassin" and b.assassin_dashing > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ASSASSIN_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 30
+                            b.assassin_dashing = 0
+                            b.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = b.x - a.x
+                            ddy = b.y - a.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            b.assassin_retreat_dx = ddx / dd
+                            b.assassin_retreat_dy = ddy / dd
+                            b.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if a.role == "mirror" and a.hit_cooldown == 0:
+                            b.take_damage(MIRROR_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if b.role == "mirror" and b.hit_cooldown == 0:
+                            a.take_damage(MIRROR_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if a.role == "charger" and a.charging > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(CHARGER_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                ddx = b.x - a.x
+                                ddy = b.y - a.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            a.hit_cooldown = 30
+                            a.charging = 0
+                            a.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if b.role == "charger" and b.charging > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(CHARGER_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                ddx = a.x - b.x
+                                ddy = a.y - b.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                a.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            b.hit_cooldown = 30
+                            b.charging = 0
+                            b.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if a.mimic_original and a.mimic_timer <= 0 and b.team_id != a.team_id:
+                            a.role = b.role
+                            a.speed = ROLE_SPEEDS.get(b.role, 3.0)
+                            a.mimic_display_role = b.role
+                            a.mimic_timer = MIMIC_COPY_DURATION
+                        if b.mimic_original and b.mimic_timer <= 0 and a.team_id != b.team_id:
+                            b.role = a.role
+                            b.speed = ROLE_SPEEDS.get(a.role, 3.0)
+                            b.mimic_display_role = a.role
+                            b.mimic_timer = MIMIC_COPY_DURATION
+                        resolve_collision(a, b)
+
+            # sword hits
+            for b in alive_balls:
+                if b.role != "swordsman" or b.hit_cooldown > 0:
+                    continue
+                sbx = b.x + math.cos(b.sword_angle) * b.radius
+                sby = b.y + math.sin(b.sword_angle) * b.radius
+                tx, ty = b.sword_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    # Alliance skip
+                    if (b.hg_alliance_id is not None and b.hg_alliance_id == other.hg_alliance_id
+                            and not (b.hg_personality == 4 and b.hg_betrayal_timer <= 0)):
+                        continue
+                    if point_near_segment(other.x, other.y, sbx, sby, tx, ty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(tx - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = 20
+                                break
+                        other.take_damage(SWORD_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = 20
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, 10.0)
+                        break
+
+            # hammer hits
+            for b in alive_balls:
+                if b.role != "hammer" or b.hit_cooldown > 0:
+                    continue
+                tx, ty = b.hammer_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if (b.hg_alliance_id is not None and b.hg_alliance_id == other.hg_alliance_id
+                            and not (b.hg_personality == 4 and b.hg_betrayal_timer <= 0)):
+                        continue
+                    if dist(other.x, other.y, tx, ty) <= other.radius + HAMMER_HEAD_SIZE:
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                                break
+                        other.take_damage(HAMMER_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, HAMMER_KNOCKBACK)
+                        break
+
+            # chainsaw hits
+            for b in alive_balls:
+                if b.role != "chainsaw" or b.hit_cooldown > 0:
+                    continue
+                cbx = b.x + math.cos(b.chainsaw_angle) * b.radius
+                cby = b.y + math.sin(b.chainsaw_angle) * b.radius
+                ctx, cty = b.chainsaw_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if (b.hg_alliance_id is not None and b.hg_alliance_id == other.hg_alliance_id
+                            and not (b.hg_personality == 4 and b.hg_betrayal_timer <= 0)):
+                        continue
+                    if point_near_segment(other.x, other.y, cbx, cby, ctx, cty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(ctx - other.y, ctx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                continue
+                        other.take_damage(CHAINSAW_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = CHAINSAW_HIT_COOLDOWN
+                        break
+
+            # wall update + ball-wall collisions
+            for w in walls:
+                if not w.alive:
+                    continue
+                w.update()
+                if w.exploding:
+                    if w.explode_frames == 9:
+                        blast_angle = math.atan2(w.blast_dy, w.blast_dx)
+                        spread = math.pi / 3
+                        for b in alive_balls:
+                            if b.team_id == w.team_id:
+                                continue
+                            d = dist(w.x, w.y, b.x, b.y)
+                            if d > FORT_EXPLODE_RADIUS:
+                                continue
+                            angle_to = math.atan2(b.y - w.y, b.x - w.x)
+                            diff = (angle_to - blast_angle + math.pi) % (2 * math.pi) - math.pi
+                            if abs(diff) <= spread:
+                                b.take_damage(FORT_EXPLODE_DAMAGE)
+                                b.last_hit_by_team = w.team_id
+                                ddx = b.x - w.x
+                                ddy = b.y - w.y
+                                dd = max(d, 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 12.0)
+                    continue
+                x1, y1, x2, y2 = w.endpoints()
+                for b in alive_balls:
+                    if b.team_id == w.team_id:
+                        continue
+                    if point_near_segment(b.x, b.y, x1, y1, x2, y2, b.radius + w.thickness // 2):
+                        w.hp -= 1
+                        ddx = b.x - w.x
+                        ddy = b.y - w.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 6.0)
+
+            # ── betrayal detection (check if any alliance member took damage from ally) ──
+            for b in alive_balls:
+                if b.hg_alliance_id is not None and b.last_hit_by_team is not None:
+                    if b.hp < getattr(b, '_hg_prev_hp', b.hp):
+                        detect_betrayal(b, b.last_hit_by_team)
+            for b in alive_balls:
+                b._hg_prev_hp = b.hp
+
+            # ── death handling (permanent in Hunger Games) ──
+            for b in balls:
+                if b.hp <= 0 and b.alive:
+                    b.alive = False
+                    # Credit killer
+                    if b.last_hit_by_team is not None:
+                        for killer in balls:
+                            if killer.team_id == b.last_hit_by_team and killer.alive:
+                                killer.hg_kill_count += 1
+                                break
+                    # Traitor post-kill: leave alliance and reset
+                    if b.last_hit_by_team is not None:
+                        for killer in balls:
+                            if killer.team_id == b.last_hit_by_team and killer.alive:
+                                if (killer.hg_personality == 4
+                                        and killer.hg_alliance_id is not None
+                                        and b.hg_alliance_id == killer.hg_alliance_id):
+                                    leave_alliance(killer)
+                                    killer.hg_betrayal_timer = random.randint(
+                                        HG_BETRAYAL_MIN_TIMER, HG_BETRAYAL_MAX_TIMER)
+                                break
+                    # Leave alliance on death
+                    if b.hg_alliance_id is not None:
+                        was_leader = b.hg_is_leader
+                        old_aid = b.hg_alliance_id
+                        b.hg_alliance_id = None
+                        b.hg_is_leader = False
+                        if was_leader:
+                            # Dissolve alliance
+                            for m in balls:
+                                if m.alive and m.hg_alliance_id == old_aid:
+                                    m.hg_alliance_id = None
+                                    m.hg_is_leader = False
+                                    m.hg_leader_ref = None
+                                    m.hg_leader_target = None
+                                    m.color = m.hg_original_color
+
+            # clean up dead projectiles
+            spears = [s for s in spears if s.alive]
+            traps = [t for t in traps if t.alive]
+            bombs = [bm for bm in bombs if bm.alive]
+            bullets = [bl for bl in bullets if bl.alive]
+            arrows = [ar for ar in arrows if ar.alive]
+            orbs = [orb for orb in orbs if orb.alive]
+            ice_bolts = [ib for ib in ice_bolts if ib.alive]
+            walls = [w for w in walls if w.alive]
+
+            # ── stalemate detection ──
+            current_total_hp = sum(b.hp for b in balls if b.alive)
+            if current_total_hp < last_total_hp:
+                stalemate_timer = 0
+                stalemate_countdown = 0
+            else:
+                stalemate_timer += 1
+            last_total_hp = current_total_hp
+
+            alive_non_minion = [b for b in balls if b.alive and not b.is_minion]
+            if len(alive_non_minion) >= 2 and stalemate_timer >= STALEMATE_DETECT:
+                if stalemate_countdown == 0:
+                    stalemate_countdown = STALEMATE_COUNTDOWN
+                stalemate_countdown -= 1
+                if stalemate_countdown <= 0:
+                    # Force all remaining balls to fight: dissolve alliances, make aggressive
+                    for b in alive_non_minion:
+                        if b.hg_alliance_id is not None:
+                            leave_alliance(b)
+                        b.hg_personality = 3  # Aggressive
+                        b.hg_betrayal_timer = 0
+                    stalemate_timer = 0
+                    stalemate_countdown = 0
+
+            # ── win condition ──
+            if len(alive_non_minion) <= 1:
+                if len(alive_non_minion) == 1:
+                    w = alive_non_minion[0]
+                    winner_text = f"Ball {w.team_id + 1} Wins!"
+                    winner_color = w.hg_original_color
+                else:
+                    winner_text = "Draw!"
+                    winner_color = (180, 180, 180)
+
+        # ── draw ──
+        screen.fill((10, 10, 15))  # dark background
+
+        # Golden cornucopia ring at center
+        ring_r = int(spawn_radius * 0.55)
+        pygame.draw.circle(screen, (180, 150, 50), (cx, cy), ring_r, 2)
+        pygame.draw.circle(screen, (120, 100, 30), (cx, cy), ring_r - 4, 1)
+
+        # Draw power-ups
+        for p in powerups:
+            p.draw(screen, frame_count)
+
+        # Draw walls, fences, traps, bombs (under balls)
+        for w in walls:
+            w.draw(screen)
+        for f in fences:
+            f.draw(screen)
+        for t in traps:
+            t.draw(screen)
+        for bm in bombs:
+            bm.draw(screen)
+
+        # Draw balls
+        for b in balls:
+            if b.alive:
+                # Alliance outline ring
+                if b.hg_alliance_id is not None:
+                    leader = None
+                    for m in balls:
+                        if m.alive and m.hg_alliance_id == b.hg_alliance_id and m.hg_is_leader:
+                            leader = m
+                            break
+                    ring_color = leader.hg_original_color if leader else b.color
+                    pygame.draw.circle(screen, ring_color, (int(b.x), int(b.y)),
+                                       b.radius + 4, 2)
+                b.draw(screen)
+                # Personality name above
+                pname = PERSONALITY_NAMES.get(b.hg_personality, "")
+                if pname:
+                    pcolors = {1: (150, 180, 255), 2: (100, 255, 150), 3: (255, 100, 100),
+                               4: (255, 200, 50), 5: (255, 255, 100)}
+                    pcol = pcolors.get(b.hg_personality, (200, 200, 200))
+                    ptxt = small_font.render(pname, True, pcol)
+                    screen.blit(ptxt, (int(b.x) - ptxt.get_width() // 2,
+                                       int(b.y) - b.radius - 14))
+
+        # Draw projectiles
+        for s in spears:
+            s.draw(screen)
+        for bl in bullets:
+            bl.draw(screen)
+        for ar in arrows:
+            ar.draw(screen)
+        for orb in orbs:
+            orb.draw(screen)
+        for ib in ice_bolts:
+            ib.draw(screen)
+
+        # ── HUD ──
+        alive_count = len([b for b in balls if b.alive and not b.is_minion])
+        alive_label = font.render(f"Alive: {alive_count}", True, (200, 200, 255))
+        screen.blit(alive_label, (10, 8))
+
+        # Top killers
+        kill_balls = sorted([b for b in balls if b.hg_kill_count > 0],
+                            key=lambda b: b.hg_kill_count, reverse=True)[:3]
+        ky = 30
+        for kb in kill_balls:
+            ktxt = small_font.render(f"Ball {kb.team_id + 1}: {kb.hg_kill_count} kills", True,
+                                     kb.hg_original_color)
+            screen.blit(ktxt, (10, ky))
+            ky += 16
+
+        # Speed indicator
+        if paused:
+            speed_text = font.render("PAUSED  (Space)", True, (255, 255, 100))
+        else:
+            speed_text = font.render(f"Speed: {game_speed}x  (1/2/3/4)", True, (180, 180, 180))
+        screen.blit(speed_text, (WIDTH - speed_text.get_width() - 10, 8))
+
+        # Mode label
+        mode_label = small_font.render("HUNGER GAMES", True, (220, 180, 50))
+        screen.blit(mode_label, (WIDTH - mode_label.get_width() - 10, 28))
+
+        # Stalemate countdown warning
+        if stalemate_countdown > 0:
+            secs_left = max(1, (stalemate_countdown // 60) + 1)
+            warn = font.render(f"STALEMATE! Forced fight in {secs_left}s", True, (255, 80, 80))
+            screen.blit(warn, (WIDTH // 2 - warn.get_width() // 2, HEIGHT - 30))
+        elif stalemate_timer >= STALEMATE_DETECT // 2:
+            hint = small_font.render("No fighting detected...", True, (180, 140, 60))
+            screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 22))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
+def evolution_mode(team_configs, arena_idx=0):
+    global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
+    total_balls = len(team_configs)
+
+    aw, ah, a_hint = ARENA_SIZES[arena_idx]
+    WIDTH = aw
+    HEIGHT = ah
+
+    if total_balls > 6:
+        BALL_RADIUS = max(12, BASE_BALL_RADIUS - (total_balls - 6) * 2)
+    else:
+        BALL_RADIUS = BASE_BALL_RADIUS
+    SWORD_LENGTH = BALL_RADIUS * 2
+    TRAP_RADIUS = BALL_RADIUS * 4
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+    def apply_tier(b, new_tier):
+        new_tier = max(0, min(EVO_MAX_TIER, new_tier))
+        b.evo_tier = new_tier
+        new_role = EVO_TIER_LIST[new_tier]
+        b.role = new_role
+        b.speed = ROLE_SPEEDS.get(new_role, 3.0)
+        b.hp = TANK_HP if new_role == "tank" else 100
+        b.max_hp = b.hp
+        # reset all cooldowns so new role can act immediately
+        b.spear_cooldown = 0
+        b.trap_cooldown = 0
+        b.bomb_cooldown = 0
+        b.heal_cooldown = 0
+        b.sniper_cooldown = 0
+        b.invis_cooldown = 0
+        b.invisible = False
+        b.invis_timer = 0
+        b.wall_cooldown = 0
+        b.archer_cooldown = 0
+        b.wizard_cooldown = 0
+        b.assassin_dash_cooldown = 0
+        b.assassin_dashing = 0
+        b.assassin_retreating = 0
+        b.necro_cooldown = 0
+        b.ice_cooldown = 0
+        b.summon_cooldown = 0
+        b.charge_cooldown = 0
+        b.charging = 0
+        b.charge_windup = 0
+        b.fence_cooldown = 0
+        b.fence_post1 = None
+        b.mimic_timer = 0
+        b.mimic_original = (new_role == "mimic")
+        b.mimic_display_role = None
+        b.hit_cooldown = 0
+
+    # spawn balls with FFA colors
+    balls = spawn_balls(team_configs)
+    for idx, b in enumerate(balls):
+        ffa_color = HG_FFA_COLORS[idx % len(HG_FFA_COLORS)]
+        b.color = ffa_color
+        b.evo_original_color = ffa_color
+        b._evolution_mode = True
+        b.evo_tier = 0
+        b.last_hit_by_team = None
+
+    spears = []
+    traps = []
+    bombs = []
+    bullets = []
+    arrows = []
+    orbs = []
+    ice_bolts = []
+    walls = []
+    fences = []
+    winner_text = None
+    winner_color = (255, 255, 255)
+    speed_options = [1, 2, 4, 10]
+    speed_index = 0
+    paused = False
+    respawn_queue = []  # (ball, respawn_frame)
+    frame_count = 0
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    evolution_mode(team_configs, arena_idx)
+                    return
+                if event.key == pygame.K_m:
+                    return
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                if event.key == pygame.K_1:
+                    speed_index = 0
+                if event.key == pygame.K_2:
+                    speed_index = 1
+                if event.key == pygame.K_3:
+                    speed_index = 2
+                if event.key == pygame.K_4:
+                    speed_index = 3
+
+        game_speed = speed_options[speed_index]
+
+        if winner_text is not None:
+            screen.fill((10, 10, 20))
+            text = big_font.render(winner_text, True, winner_color)
+            r1 = font.render("R = Rematch  |  M = Menu", True, (180, 180, 180))
+            screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 30))
+            screen.blit(r1, (WIDTH // 2 - r1.get_width() // 2, HEIGHT // 2 + 30))
+            pygame.display.flip()
+            clock.tick(60)
+            continue
+
+        for _tick in range(game_speed):
+            if winner_text is not None or paused:
+                break
+
+            frame_count += 1
+            alive_balls = [b for b in balls if b.alive]
+
+            # AI + movement + abilities
+            for b in alive_balls:
+                target = b.find_target(alive_balls)
+                b.seek(target, alive_balls)
+                b.move()
+                b.try_throw_spear(target, spears)
+                b.try_place_trap(target, traps)
+                b.try_drop_bomb(target, bombs)
+                b.try_heal(alive_balls)
+                b.aim_shield(alive_balls)
+                b.try_fire_bullet(target, bullets)
+                b.try_fire_arrow(target, arrows)
+                b.try_cast_orb(target, orbs)
+                b.try_fire_ice_bolt(target, ice_bolts)
+                b.try_place_wall(target, walls, alive_balls)
+                b.try_place_fence(target, fences)
+
+            # fence update & damage
+            for f in fences:
+                if f.alive:
+                    f.update()
+                    for b in alive_balls:
+                        if b.alive:
+                            if f.check_damage(b):
+                                b.last_hit_by_team = f.team_id
+            fences = [f for f in fences if f.alive]
+
+            # summoner spawns minions
+            for b in alive_balls:
+                if b.role != "summoner" or b.summon_cooldown > 0:
+                    continue
+                b.minions = [m for m in b.minions if m.alive]
+                if len(b.minions) >= SUMMONER_MAX_MINIONS:
+                    continue
+                angle = random.uniform(0, 2 * math.pi)
+                mx2 = b.x + math.cos(angle) * (b.radius * 2.5)
+                my2 = b.y + math.sin(angle) * (b.radius * 2.5)
+                mx2 = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, mx2))
+                my2 = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, my2))
+                minion = Ball(mx2, my2, b.color, b.team_id, "zombie")
+                minion.hp = SUMMONER_MINION_HP
+                minion.max_hp = SUMMONER_MINION_HP
+                minion.radius = max(8, int(BALL_RADIUS * SUMMONER_MINION_RADIUS_SCALE))
+                minion.is_minion = True
+                minion._evolution_mode = True
+                balls.append(minion)
+                b.minions.append(minion)
+                b.summon_cooldown = SUMMONER_COOLDOWN
+
+            # move spears
+            for s in spears:
+                if s.alive:
+                    s.move()
+
+            # spear hit detection
+            for s in spears:
+                if not s.alive or s.carried_ball is not None:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == s.team_id or b.carried_by_spear:
+                        continue
+                    if dist(s.x, s.y, b.x, b.y) <= b.radius + 5:
+                        if b.role == "mirror":
+                            s.dx = -s.dx
+                            s.dy = -s.dy
+                            s.angle = math.atan2(s.dy, s.dx)
+                            s.team_id = b.team_id
+                            s.x += s.dx * 2
+                            s.y += s.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(s.y - b.y, s.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                s.alive = False
+                                break
+                        b.take_damage(SPEAR_DAMAGE)
+                        b.last_hit_by_team = s.team_id
+                        if b.trapped_in is not None:
+                            b.trapped_in.captured_ball = None
+                            b.trapped_in.alive = False
+                            b.trapped_in = None
+                        b.carried_by_spear = True
+                        b.pinned_timer = 0
+                        b.vx = 0
+                        b.vy = 0
+                        s.carried_ball = b
+                        break
+
+            # trap trigger detection + update
+            for t in traps:
+                if not t.alive:
+                    continue
+                if t.captured_ball is not None:
+                    t.update()
+                    continue
+                for b in alive_balls:
+                    if b.team_id == t.team_id or b.trapped_in is not None or b.carried_by_spear or b.pinned_timer > 0:
+                        continue
+                    if dist(t.x, t.y, b.x, b.y) <= t.radius:
+                        t.captured_ball = b
+                        b.trapped_in = t
+                        angle = random.uniform(0, 2 * math.pi)
+                        b.vx = math.cos(angle) * 4.0
+                        b.vy = math.sin(angle) * 4.0
+                        b.bounce_timer = 0
+                        break
+
+            # move bullets
+            for bl in bullets:
+                if bl.alive:
+                    bl.move()
+
+            # bullet hit detection
+            for bl in bullets:
+                if not bl.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == bl.team_id:
+                        continue
+                    if dist(bl.x, bl.y, b.x, b.y) <= b.radius + 3:
+                        if b.role == "mirror":
+                            bl.dx = -bl.dx
+                            bl.dy = -bl.dy
+                            bl.angle = math.atan2(bl.dy, bl.dx)
+                            bl.team_id = b.team_id
+                            bl.x += bl.dx * 2
+                            bl.y += bl.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(bl.y - b.y, bl.x - b.x)
+                            if b.is_angle_in_shield(angle, attacker_role="sniper"):
+                                bl.alive = False
+                                break
+                        b.take_damage(SNIPER_DAMAGE)
+                        b.last_hit_by_team = bl.team_id
+                        bl.alive = False
+                        ddx = b.x - bl.x
+                        ddy = b.y - bl.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 5.0)
+                        break
+
+            # move arrows
+            for ar in arrows:
+                if ar.alive:
+                    ar.move()
+
+            # arrow hit detection
+            for ar in arrows:
+                if not ar.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == ar.team_id:
+                        continue
+                    if dist(ar.x, ar.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ar.dx = -ar.dx
+                            ar.dy = -ar.dy
+                            ar.angle = math.atan2(ar.dy, ar.dx)
+                            ar.team_id = b.team_id
+                            ar.x += ar.dx * 2
+                            ar.y += ar.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ar.y - b.y, ar.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ar.alive = False
+                                break
+                        b.take_damage(ARCHER_DAMAGE)
+                        b.last_hit_by_team = ar.team_id
+                        ar.alive = False
+                        ddx = b.x - ar.x
+                        ddy = b.y - ar.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 3.0)
+                        break
+
+            # move orbs + hit detection
+            for orb in orbs:
+                if not orb.alive:
+                    continue
+                orb.move()
+                if orb.exploding:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == orb.team_id:
+                        continue
+                    if dist(orb.x, orb.y, b.x, b.y) <= b.radius + 6:
+                        if b.role == "mirror":
+                            orb.dx = -orb.dx
+                            orb.dy = -orb.dy
+                            orb.team_id = b.team_id
+                            orb.x += orb.dx * 2
+                            orb.y += orb.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(orb.y - b.y, orb.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                orb.alive = False
+                                break
+                        b.take_damage(WIZARD_DAMAGE)
+                        b.last_hit_by_team = orb.team_id
+                        orb.exploding = True
+                        for other in alive_balls:
+                            if other is b or other.team_id == orb.team_id:
+                                continue
+                            if dist(orb.x, orb.y, other.x, other.y) <= WIZARD_SPLASH_RADIUS:
+                                other.take_damage(WIZARD_SPLASH_DAMAGE)
+                                other.last_hit_by_team = orb.team_id
+                        break
+
+            # move ice bolts + hit detection
+            for ib in ice_bolts:
+                if not ib.alive:
+                    continue
+                ib.move()
+                for b in alive_balls:
+                    if b.team_id == ib.team_id:
+                        continue
+                    if dist(ib.x, ib.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ib.dx = -ib.dx
+                            ib.dy = -ib.dy
+                            ib.angle = math.atan2(ib.dy, ib.dx)
+                            ib.team_id = b.team_id
+                            ib.x += ib.dx * 2
+                            ib.y += ib.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ib.y - b.y, ib.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ib.alive = False
+                                break
+                        b.take_damage(ICE_MAGE_DAMAGE)
+                        b.last_hit_by_team = ib.team_id
+                        b.slow_timer = ICE_SLOW_DURATION
+                        ib.alive = False
+                        break
+
+            # bomb update + explosion damage
+            for bomb in bombs:
+                if not bomb.alive:
+                    continue
+                was_exploding = bomb.exploding
+                bomb.update()
+                if bomb.exploding and not was_exploding:
+                    for b in alive_balls:
+                        if b.team_id == bomb.team_id:
+                            continue
+                        d = dist(bomb.x, bomb.y, b.x, b.y)
+                        if d <= bomb.explosion_radius:
+                            b.take_damage(BOMB_DAMAGE)
+                            b.last_hit_by_team = bomb.team_id
+                            dx = b.x - bomb.x
+                            dy = b.y - bomb.y
+                            dd = max(d, 0.01)
+                            b.apply_knockback(dx / dd, dy / dd, BOMB_KNOCKBACK)
+
+            # body collisions
+            for i in range(len(alive_balls)):
+                for j in range(i + 1, len(alive_balls)):
+                    a, b = alive_balls[i], alive_balls[j]
+                    if a.team_id == b.team_id:
+                        if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                            resolve_collision(a, b)
+                        continue
+
+                    if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                        if a.role in ("zombie", "conqueror") and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ZOMBIE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 5
+                        if b.role in ("zombie", "conqueror") and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ZOMBIE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 5
+                        if a.role == "berserker" and a.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * a.rage_multiplier)
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(dmg)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 20
+                        if b.role == "berserker" and b.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * b.rage_multiplier)
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(dmg)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 20
+                        if a.role == "shield" and a.hit_cooldown == 0:
+                            b.take_damage(SHIELD_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 10
+                        if b.role == "shield" and b.hit_cooldown == 0:
+                            a.take_damage(SHIELD_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 10
+                        if a.role == "ninja" and a.invisible and a.hit_cooldown == 0:
+                            b.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.invisible = False
+                            a.invis_timer = 0
+                            a.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            a.hit_cooldown = 30
+                        if b.role == "ninja" and b.invisible and b.hit_cooldown == 0:
+                            a.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.invisible = False
+                            b.invis_timer = 0
+                            b.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            b.hit_cooldown = 30
+                        if a.role == "vampire" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(VAMPIRE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                a.hp = min(a.max_hp, a.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            a.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if b.role == "vampire" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(VAMPIRE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                b.hp = min(b.max_hp, b.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            b.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if a.role == "tank" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(TANK_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = TANK_HIT_COOLDOWN
+                        if b.role == "tank" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(TANK_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = TANK_HIT_COOLDOWN
+                        if a.role == "assassin" and a.assassin_dashing > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ASSASSIN_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 30
+                            a.assassin_dashing = 0
+                            a.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = a.x - b.x
+                            ddy = a.y - b.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            a.assassin_retreat_dx = ddx / dd
+                            a.assassin_retreat_dy = ddy / dd
+                            a.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if b.role == "assassin" and b.assassin_dashing > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ASSASSIN_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 30
+                            b.assassin_dashing = 0
+                            b.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = b.x - a.x
+                            ddy = b.y - a.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            b.assassin_retreat_dx = ddx / dd
+                            b.assassin_retreat_dy = ddy / dd
+                            b.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if a.role == "mirror" and a.hit_cooldown == 0:
+                            b.take_damage(MIRROR_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if b.role == "mirror" and b.hit_cooldown == 0:
+                            a.take_damage(MIRROR_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if a.role == "charger" and a.charging > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(CHARGER_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                ddx = b.x - a.x
+                                ddy = b.y - a.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            a.hit_cooldown = 30
+                            a.charging = 0
+                            a.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if b.role == "charger" and b.charging > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(CHARGER_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                ddx = a.x - b.x
+                                ddy = a.y - b.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                a.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            b.hit_cooldown = 30
+                            b.charging = 0
+                            b.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if a.mimic_original and a.mimic_timer <= 0 and b.team_id != a.team_id:
+                            a.role = b.role
+                            a.speed = ROLE_SPEEDS.get(b.role, 3.0)
+                            a.mimic_display_role = b.role
+                            a.mimic_timer = MIMIC_COPY_DURATION
+                        if b.mimic_original and b.mimic_timer <= 0 and a.team_id != b.team_id:
+                            b.role = a.role
+                            b.speed = ROLE_SPEEDS.get(a.role, 3.0)
+                            b.mimic_display_role = a.role
+                            b.mimic_timer = MIMIC_COPY_DURATION
+                        resolve_collision(a, b)
+
+            # sword hits
+            for b in alive_balls:
+                if b.role != "swordsman" or b.hit_cooldown > 0:
+                    continue
+                sbx = b.x + math.cos(b.sword_angle) * b.radius
+                sby = b.y + math.sin(b.sword_angle) * b.radius
+                tx, ty = b.sword_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, sbx, sby, tx, ty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = 20
+                                break
+                        other.take_damage(SWORD_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = 20
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, 10.0)
+                        break
+
+            # hammer hits
+            for b in alive_balls:
+                if b.role != "hammer" or b.hit_cooldown > 0:
+                    continue
+                tx, ty = b.hammer_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if dist(other.x, other.y, tx, ty) <= other.radius + HAMMER_HEAD_SIZE:
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                                break
+                        other.take_damage(HAMMER_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, HAMMER_KNOCKBACK)
+                        break
+
+            # chainsaw hits
+            for b in alive_balls:
+                if b.role != "chainsaw" or b.hit_cooldown > 0:
+                    continue
+                cbx = b.x + math.cos(b.chainsaw_angle) * b.radius
+                cby = b.y + math.sin(b.chainsaw_angle) * b.radius
+                ctx, cty = b.chainsaw_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, cbx, cby, ctx, cty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(ctx - other.y, ctx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                continue
+                        other.take_damage(CHAINSAW_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = CHAINSAW_HIT_COOLDOWN
+                        break
+
+            # wall update + ball-wall collisions
+            for w in walls:
+                if not w.alive:
+                    continue
+                w.update()
+                if w.exploding:
+                    if w.explode_frames == 9:
+                        blast_angle = math.atan2(w.blast_dy, w.blast_dx)
+                        spread = math.pi / 3
+                        for b in alive_balls:
+                            if b.team_id == w.team_id:
+                                continue
+                            d = dist(w.x, w.y, b.x, b.y)
+                            if d > FORT_EXPLODE_RADIUS:
+                                continue
+                            angle_to = math.atan2(b.y - w.y, b.x - w.x)
+                            diff = (angle_to - blast_angle + math.pi) % (2 * math.pi) - math.pi
+                            if abs(diff) <= spread:
+                                b.take_damage(FORT_EXPLODE_DAMAGE)
+                                b.last_hit_by_team = w.team_id
+                                ddx = b.x - w.x
+                                ddy = b.y - w.y
+                                dd = max(d, 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 12.0)
+                    continue
+                x1, y1, x2, y2 = w.endpoints()
+                for b in alive_balls:
+                    if b.team_id == w.team_id:
+                        continue
+                    if point_near_segment(b.x, b.y, x1, y1, x2, y2, b.radius + w.thickness // 2):
+                        w.hp -= 1
+                        ddx = b.x - w.x
+                        ddy = b.y - w.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 6.0)
+
+            # ── death handling (evolution logic) ──
+            # first pass: collect all deaths and find killers BEFORE marking anyone dead
+            deaths = []
+            for b in balls:
+                if b.hp <= 0 and b.alive:
+                    if getattr(b, 'is_minion', False):
+                        b.alive = False
+                        continue
+                    killer = None
+                    if b.last_hit_by_team is not None:
+                        for k in balls:
+                            if k.team_id == b.last_hit_by_team and k is not b and not getattr(k, 'is_minion', False):
+                                killer = k
+                                break
+                    deaths.append((b, killer))
+            # second pass: process deaths
+            for b, killer in deaths:
+                b.alive = False
+                if killer is not None:
+                    apply_tier(killer, killer.evo_tier + 1)
+                    killer.color = killer.evo_original_color
+                    if killer.evo_tier >= EVO_MAX_TIER:
+                        winner_text = f"Ball {killer.team_id + 1} Wins! (Tier {EVO_MAX_TIER})"
+                        winner_color = killer.evo_original_color
+                # victim respawns at same tier
+                b.color = b.evo_original_color
+                respawn_queue.append((b, frame_count + EVO_RESPAWN_DELAY))
+
+            # process respawn queue
+            for entry in respawn_queue[:]:
+                b, respawn_frame = entry
+                if frame_count >= respawn_frame:
+                    respawn_queue.remove(entry)
+                    edge = random.choice(["top", "bottom", "left", "right"])
+                    margin = BALL_RADIUS + 10
+                    if edge == "top":
+                        b.x = random.randint(margin, WIDTH - margin)
+                        b.y = margin
+                    elif edge == "bottom":
+                        b.x = random.randint(margin, WIDTH - margin)
+                        b.y = HEIGHT - margin
+                    elif edge == "left":
+                        b.x = margin
+                        b.y = random.randint(margin, HEIGHT - margin)
+                    else:
+                        b.x = WIDTH - margin
+                        b.y = random.randint(margin, HEIGHT - margin)
+                    b.alive = True
+                    b.hp = b.max_hp
+                    b.vx = 0
+                    b.vy = 0
+                    b.bounce_timer = 0
+                    b.pinned_timer = 0
+                    b.carried_by_spear = False
+                    b.trapped_in = None
+                    b.hit_cooldown = 0
+                    b.last_hit_by_team = None
+
+            # clean up dead projectiles
+            spears = [s for s in spears if s.alive]
+            traps = [t for t in traps if t.alive]
+            bombs = [bm for bm in bombs if bm.alive]
+            bullets = [bl for bl in bullets if bl.alive]
+            arrows = [ar for ar in arrows if ar.alive]
+            orbs = [orb for orb in orbs if orb.alive]
+            ice_bolts = [ib for ib in ice_bolts if ib.alive]
+            walls = [w for w in walls if w.alive]
+
+        # ── draw ──
+        screen.fill((10, 10, 20))  # dark blue background
+
+        # draw traps, bombs, walls, fences first (under balls)
+        for w in walls:
+            w.draw(screen)
+        for f in fences:
+            f.draw(screen)
+        for t in traps:
+            t.draw(screen)
+        for bm in bombs:
+            bm.draw(screen)
+
+        # draw balls with tier glow
+        for b in balls:
+            if b.alive and not getattr(b, 'is_minion', False):
+                tier_pct = b.evo_tier / max(EVO_MAX_TIER, 1)
+                r_glow = int(60 + 195 * tier_pct)
+                g_glow = int(200 - 150 * tier_pct)
+                b_glow = int(80 - 60 * tier_pct)
+                glow_col = (r_glow, g_glow, b_glow)
+                pygame.draw.circle(screen, glow_col, (int(b.x), int(b.y)), b.radius + 3, 2)
+                b.draw(screen)
+                # tier label above ball
+                tier_txt = small_font.render(f"T{b.evo_tier} {EVO_TIER_LIST[b.evo_tier].capitalize()}", True, glow_col)
+                screen.blit(tier_txt, (int(b.x) - tier_txt.get_width() // 2, int(b.y) - b.radius - 24))
+            elif b.alive:
+                b.draw(screen)
+
+        # draw spears and projectiles on top
+        for s in spears:
+            s.draw(screen)
+        for bl in bullets:
+            bl.draw(screen)
+        for ar in arrows:
+            ar.draw(screen)
+        for orb in orbs:
+            orb.draw(screen)
+        for ib in ice_bolts:
+            ib.draw(screen)
+
+        # draw respawn indicators
+        for entry in respawn_queue:
+            b, respawn_frame = entry
+            frames_left = respawn_frame - frame_count
+            if frames_left > 0:
+                secs = frames_left / 60.0
+                color = b.evo_original_color if b.evo_original_color else (160, 160, 160)
+                dim_color = (color[0] // 3, color[1] // 3, color[2] // 3)
+                pygame.draw.circle(screen, dim_color, (int(b.x), int(b.y)), b.radius // 2)
+                timer_text = small_font.render(f"{secs:.1f}s", True, color)
+                screen.blit(timer_text, (int(b.x) - timer_text.get_width() // 2,
+                                         int(b.y) - b.radius - 10))
+
+        # ── HUD ──
+        # evolution leaderboard (top 5)
+        non_minion_balls = [b for b in balls if not getattr(b, 'is_minion', False)]
+        sorted_balls = sorted(non_minion_balls, key=lambda b: b.evo_tier, reverse=True)
+        y_hud = 8
+        hdr = font.render("Evolution Leaderboard", True, (200, 200, 255))
+        screen.blit(hdr, (10, y_hud))
+        y_hud += 22
+        for idx, b in enumerate(sorted_balls[:5]):
+            color = b.evo_original_color if b.evo_original_color else (200, 200, 200)
+            entry_text = small_font.render(
+                f"{idx + 1}. Ball {b.team_id + 1}: T{b.evo_tier} {EVO_TIER_LIST[b.evo_tier].capitalize()}",
+                True, color)
+            screen.blit(entry_text, (10, y_hud))
+            y_hud += 16
+
+        # progress bar for leader
+        if sorted_balls:
+            leader = sorted_balls[0]
+            bar_w = 150
+            bar_h = 12
+            bar_x = 10
+            bar_y = y_hud + 5
+            pygame.draw.rect(screen, (40, 40, 60), (bar_x, bar_y, bar_w, bar_h))
+            prog_w = int((leader.evo_tier / max(EVO_MAX_TIER, 1)) * bar_w)
+            pygame.draw.rect(screen, leader.evo_original_color or (100, 200, 100), (bar_x, bar_y, prog_w, bar_h))
+            prog_txt = small_font.render(f"{leader.evo_tier}/{EVO_MAX_TIER}", True, (255, 255, 255))
+            screen.blit(prog_txt, (bar_x + bar_w + 5, bar_y - 2))
+
+        # speed indicator
+        if paused:
+            speed_text = font.render("PAUSED  (Space)", True, (255, 255, 100))
+        else:
+            speed_text = font.render(f"Speed: {game_speed}x  (1/2/3/4)", True, (180, 180, 180))
+        screen.blit(speed_text, (WIDTH - speed_text.get_width() - 10, 8))
+
+        # mode label
+        mode_label = small_font.render("EVOLUTION", True, (100, 200, 255))
+        screen.blit(mode_label, (WIDTH - mode_label.get_width() - 10, 28))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
+def protect_the_king(team_configs, arena_idx=0):
+    global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
+    total_balls = len(team_configs)
+
+    aw, ah, a_hint = ARENA_SIZES[arena_idx]
+    WIDTH = aw
+    HEIGHT = ah
+
+    if total_balls > 6:
+        BALL_RADIUS = max(12, BASE_BALL_RADIUS - (total_balls - 6) * 2)
+    else:
+        BALL_RADIUS = BASE_BALL_RADIUS
+    SWORD_LENGTH = BALL_RADIUS * 2
+    TRAP_RADIUS = BALL_RADIUS * 4
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+    balls = spawn_balls(team_configs)
+    spears = []
+    traps = []
+    bombs = []
+    bullets = []
+    arrows = []
+    orbs = []
+    ice_bolts = []
+    walls = []
+    fences = []
+    winner_text = None
+    winner_color = (255, 255, 255)
+    speed_options = [1, 2, 4, 10]
+    speed_index = 0
+    paused = False
+    respawn_queue = []
+    frame_count = 0
+
+    # designate kings and set up guards
+    team_ids = sorted(set(cfg["team_id"] for cfg in team_configs))
+    kings = {}  # team_id -> Ball
+    eliminated_teams = set()
+
+    for b in balls:
+        b.ptk_mode = True
+        b.last_hit_by_team = None
+
+    # first ball per team becomes king
+    for tid in team_ids:
+        team_balls = [b for b in balls if b.team_id == tid]
+        if team_balls:
+            king = team_balls[0]
+            king.is_king = True
+            king.hp = PTK_KING_HP
+            king.max_hp = PTK_KING_MAX_HP
+            kings[tid] = king
+            # set guards to defend king
+            for g in team_balls[1:]:
+                g.defend_ball = king
+                g.position_leash = PTK_GUARD_LEASH
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    protect_the_king(team_configs, arena_idx)
+                    return
+                if event.key == pygame.K_m:
+                    return
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                if event.key == pygame.K_1:
+                    speed_index = 0
+                if event.key == pygame.K_2:
+                    speed_index = 1
+                if event.key == pygame.K_3:
+                    speed_index = 2
+                if event.key == pygame.K_4:
+                    speed_index = 3
+
+        game_speed = speed_options[speed_index]
+
+        if winner_text is not None:
+            screen.fill((20, 20, 30))
+            text = big_font.render(winner_text, True, winner_color)
+            r1 = font.render("R = Rematch  |  M = Menu", True, (180, 180, 180))
+            screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 30))
+            screen.blit(r1, (WIDTH // 2 - r1.get_width() // 2, HEIGHT // 2 + 30))
+            pygame.display.flip()
+            clock.tick(60)
+            continue
+
+        for _tick in range(game_speed):
+            if winner_text is not None or paused:
+                break
+
+            frame_count += 1
+            alive_balls = [b for b in balls if b.alive]
+
+            # AI + movement + abilities
+            for b in alive_balls:
+                target = b.find_target(alive_balls)
+                b.seek(target, alive_balls)
+                b.move()
+                b.try_throw_spear(target, spears)
+                b.try_place_trap(target, traps)
+                b.try_drop_bomb(target, bombs)
+                b.try_heal(alive_balls)
+                b.aim_shield(alive_balls)
+                b.try_fire_bullet(target, bullets)
+                b.try_fire_arrow(target, arrows)
+                b.try_cast_orb(target, orbs)
+                b.try_fire_ice_bolt(target, ice_bolts)
+                b.try_place_wall(target, walls, alive_balls)
+                b.try_place_fence(target, fences)
+
+            # fence update & damage
+            for f in fences:
+                if f.alive:
+                    f.update()
+                    for b in alive_balls:
+                        if b.alive:
+                            f.check_damage(b)
+            fences = [f for f in fences if f.alive]
+
+            # summoner spawns minions
+            for b in alive_balls:
+                if b.role != "summoner" or b.summon_cooldown > 0:
+                    continue
+                b.minions = [m for m in b.minions if m.alive]
+                if len(b.minions) >= SUMMONER_MAX_MINIONS:
+                    continue
+                angle = random.uniform(0, 2 * math.pi)
+                mx2 = b.x + math.cos(angle) * (b.radius * 2.5)
+                my2 = b.y + math.sin(angle) * (b.radius * 2.5)
+                mx2 = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, mx2))
+                my2 = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, my2))
+                minion = Ball(mx2, my2, b.color, b.team_id, "zombie")
+                minion.hp = SUMMONER_MINION_HP
+                minion.max_hp = SUMMONER_MINION_HP
+                minion.radius = max(8, int(BALL_RADIUS * SUMMONER_MINION_RADIUS_SCALE))
+                minion.is_minion = True
+                minion.ptk_mode = True
+                balls.append(minion)
+                b.minions.append(minion)
+                b.summon_cooldown = SUMMONER_COOLDOWN
+
+            # move spears
+            for s in spears:
+                if s.alive:
+                    s.move()
+
+            # spear hit detection
+            for s in spears:
+                if not s.alive or s.carried_ball is not None:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == s.team_id or b.carried_by_spear:
+                        continue
+                    if dist(s.x, s.y, b.x, b.y) <= b.radius + 5:
+                        if b.role == "mirror":
+                            s.dx = -s.dx
+                            s.dy = -s.dy
+                            s.angle = math.atan2(s.dy, s.dx)
+                            s.team_id = b.team_id
+                            s.x += s.dx * 2
+                            s.y += s.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(s.y - b.y, s.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                s.alive = False
+                                break
+                        b.take_damage(SPEAR_DAMAGE)
+                        b.last_hit_by_team = s.team_id
+                        if b.trapped_in is not None:
+                            b.trapped_in.captured_ball = None
+                            b.trapped_in.alive = False
+                            b.trapped_in = None
+                        b.carried_by_spear = True
+                        b.pinned_timer = 0
+                        b.vx = 0
+                        b.vy = 0
+                        s.carried_ball = b
+                        break
+
+            # trap trigger detection + update
+            for t in traps:
+                if not t.alive:
+                    continue
+                if t.captured_ball is not None:
+                    t.update()
+                    continue
+                for b in alive_balls:
+                    if b.team_id == t.team_id or b.trapped_in is not None or b.carried_by_spear or b.pinned_timer > 0:
+                        continue
+                    if dist(t.x, t.y, b.x, b.y) <= t.radius:
+                        t.captured_ball = b
+                        b.trapped_in = t
+                        angle = random.uniform(0, 2 * math.pi)
+                        b.vx = math.cos(angle) * 4.0
+                        b.vy = math.sin(angle) * 4.0
+                        b.bounce_timer = 0
+                        break
+
+            # move bullets
+            for bl in bullets:
+                if bl.alive:
+                    bl.move()
+
+            # bullet hit detection
+            for bl in bullets:
+                if not bl.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == bl.team_id:
+                        continue
+                    if dist(bl.x, bl.y, b.x, b.y) <= b.radius + 3:
+                        if b.role == "mirror":
+                            bl.dx = -bl.dx
+                            bl.dy = -bl.dy
+                            bl.angle = math.atan2(bl.dy, bl.dx)
+                            bl.team_id = b.team_id
+                            bl.x += bl.dx * 2
+                            bl.y += bl.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(bl.y - b.y, bl.x - b.x)
+                            if b.is_angle_in_shield(angle, attacker_role="sniper"):
+                                bl.alive = False
+                                break
+                        b.take_damage(SNIPER_DAMAGE)
+                        b.last_hit_by_team = bl.team_id
+                        bl.alive = False
+                        ddx = b.x - bl.x
+                        ddy = b.y - bl.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 5.0)
+                        break
+
+            # move arrows
+            for ar in arrows:
+                if ar.alive:
+                    ar.move()
+
+            # arrow hit detection
+            for ar in arrows:
+                if not ar.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == ar.team_id:
+                        continue
+                    if dist(ar.x, ar.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ar.dx = -ar.dx
+                            ar.dy = -ar.dy
+                            ar.angle = math.atan2(ar.dy, ar.dx)
+                            ar.team_id = b.team_id
+                            ar.x += ar.dx * 2
+                            ar.y += ar.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ar.y - b.y, ar.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ar.alive = False
+                                break
+                        b.take_damage(ARCHER_DAMAGE)
+                        b.last_hit_by_team = ar.team_id
+                        ar.alive = False
+                        ddx = b.x - ar.x
+                        ddy = b.y - ar.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 3.0)
+                        break
+
+            # move orbs + hit detection
+            for orb in orbs:
+                if not orb.alive:
+                    continue
+                orb.move()
+                if orb.exploding:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == orb.team_id:
+                        continue
+                    if dist(orb.x, orb.y, b.x, b.y) <= b.radius + 6:
+                        if b.role == "mirror":
+                            orb.dx = -orb.dx
+                            orb.dy = -orb.dy
+                            orb.team_id = b.team_id
+                            orb.x += orb.dx * 2
+                            orb.y += orb.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(orb.y - b.y, orb.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                orb.alive = False
+                                break
+                        b.take_damage(WIZARD_DAMAGE)
+                        b.last_hit_by_team = orb.team_id
+                        orb.exploding = True
+                        for other in alive_balls:
+                            if other is b or other.team_id == orb.team_id:
+                                continue
+                            if dist(orb.x, orb.y, other.x, other.y) <= WIZARD_SPLASH_RADIUS:
+                                other.take_damage(WIZARD_SPLASH_DAMAGE)
+                                other.last_hit_by_team = orb.team_id
+                        break
+
+            # move ice bolts + hit detection
+            for ib in ice_bolts:
+                if not ib.alive:
+                    continue
+                ib.move()
+                for b in alive_balls:
+                    if b.team_id == ib.team_id:
+                        continue
+                    if dist(ib.x, ib.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ib.dx = -ib.dx
+                            ib.dy = -ib.dy
+                            ib.angle = math.atan2(ib.dy, ib.dx)
+                            ib.team_id = b.team_id
+                            ib.x += ib.dx * 2
+                            ib.y += ib.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ib.y - b.y, ib.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ib.alive = False
+                                break
+                        b.take_damage(ICE_MAGE_DAMAGE)
+                        b.last_hit_by_team = ib.team_id
+                        b.slow_timer = ICE_SLOW_DURATION
+                        ib.alive = False
+                        break
+
+            # bomb update + explosion damage
+            for bomb in bombs:
+                if not bomb.alive:
+                    continue
+                was_exploding = bomb.exploding
+                bomb.update()
+                if bomb.exploding and not was_exploding:
+                    for b in alive_balls:
+                        if b.team_id == bomb.team_id:
+                            continue
+                        d = dist(bomb.x, bomb.y, b.x, b.y)
+                        if d <= bomb.explosion_radius:
+                            b.take_damage(BOMB_DAMAGE)
+                            b.last_hit_by_team = bomb.team_id
+                            dx = b.x - bomb.x
+                            dy = b.y - bomb.y
+                            dd = max(d, 0.01)
+                            b.apply_knockback(dx / dd, dy / dd, BOMB_KNOCKBACK)
+
+            # body collisions
+            for i in range(len(alive_balls)):
+                for j in range(i + 1, len(alive_balls)):
+                    a, b = alive_balls[i], alive_balls[j]
+                    if a.team_id == b.team_id:
+                        if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                            resolve_collision(a, b)
+                        continue
+
+                    if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                        if a.role in ("zombie", "conqueror") and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ZOMBIE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 5
+                        if b.role in ("zombie", "conqueror") and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ZOMBIE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 5
+                        if a.role == "berserker" and a.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * a.rage_multiplier)
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(dmg)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 20
+                        if b.role == "berserker" and b.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * b.rage_multiplier)
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(dmg)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 20
+                        if a.role == "shield" and a.hit_cooldown == 0:
+                            b.take_damage(SHIELD_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 10
+                        if b.role == "shield" and b.hit_cooldown == 0:
+                            a.take_damage(SHIELD_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 10
+                        if a.role == "ninja" and a.invisible and a.hit_cooldown == 0:
+                            b.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.invisible = False
+                            a.invis_timer = 0
+                            a.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            a.hit_cooldown = 30
+                        if b.role == "ninja" and b.invisible and b.hit_cooldown == 0:
+                            a.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.invisible = False
+                            b.invis_timer = 0
+                            b.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            b.hit_cooldown = 30
+                        if a.role == "vampire" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(VAMPIRE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                a.hp = min(a.max_hp, a.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            a.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if b.role == "vampire" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(VAMPIRE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                b.hp = min(b.max_hp, b.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            b.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if a.role == "tank" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(TANK_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = TANK_HIT_COOLDOWN
+                        if b.role == "tank" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(TANK_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = TANK_HIT_COOLDOWN
+                        if a.role == "assassin" and a.assassin_dashing > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ASSASSIN_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 30
+                            a.assassin_dashing = 0
+                            a.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = a.x - b.x
+                            ddy = a.y - b.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            a.assassin_retreat_dx = ddx / dd
+                            a.assassin_retreat_dy = ddy / dd
+                            a.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if b.role == "assassin" and b.assassin_dashing > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ASSASSIN_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 30
+                            b.assassin_dashing = 0
+                            b.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = b.x - a.x
+                            ddy = b.y - a.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            b.assassin_retreat_dx = ddx / dd
+                            b.assassin_retreat_dy = ddy / dd
+                            b.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if a.role == "mirror" and a.hit_cooldown == 0:
+                            b.take_damage(MIRROR_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if b.role == "mirror" and b.hit_cooldown == 0:
+                            a.take_damage(MIRROR_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if a.role == "charger" and a.charging > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(CHARGER_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                ddx = b.x - a.x
+                                ddy = b.y - a.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            a.hit_cooldown = 30
+                            a.charging = 0
+                            a.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if b.role == "charger" and b.charging > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(CHARGER_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                ddx = a.x - b.x
+                                ddy = a.y - b.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                a.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            b.hit_cooldown = 30
+                            b.charging = 0
+                            b.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if a.mimic_original and a.mimic_timer <= 0 and b.team_id != a.team_id:
+                            a.role = b.role
+                            a.speed = ROLE_SPEEDS.get(b.role, 3.0)
+                            a.mimic_display_role = b.role
+                            a.mimic_timer = MIMIC_COPY_DURATION
+                        if b.mimic_original and b.mimic_timer <= 0 and a.team_id != b.team_id:
+                            b.role = a.role
+                            b.speed = ROLE_SPEEDS.get(a.role, 3.0)
+                            b.mimic_display_role = a.role
+                            b.mimic_timer = MIMIC_COPY_DURATION
+                        resolve_collision(a, b)
+
+            # sword hits
+            for b in alive_balls:
+                if b.role != "swordsman" or b.hit_cooldown > 0:
+                    continue
+                sbx = b.x + math.cos(b.sword_angle) * b.radius
+                sby = b.y + math.sin(b.sword_angle) * b.radius
+                tx, ty = b.sword_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, sbx, sby, tx, ty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = 20
+                                break
+                        other.take_damage(SWORD_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = 20
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, 10.0)
+                        break
+
+            # hammer hits
+            for b in alive_balls:
+                if b.role != "hammer" or b.hit_cooldown > 0:
+                    continue
+                tx, ty = b.hammer_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if dist(other.x, other.y, tx, ty) <= other.radius + HAMMER_HEAD_SIZE:
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                                break
+                        other.take_damage(HAMMER_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, HAMMER_KNOCKBACK)
+                        break
+
+            # chainsaw hits
+            for b in alive_balls:
+                if b.role != "chainsaw" or b.hit_cooldown > 0:
+                    continue
+                cbx = b.x + math.cos(b.chainsaw_angle) * b.radius
+                cby = b.y + math.sin(b.chainsaw_angle) * b.radius
+                ctx, cty = b.chainsaw_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, cbx, cby, ctx, cty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(ctx - other.y, ctx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                continue
+                        other.take_damage(CHAINSAW_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = CHAINSAW_HIT_COOLDOWN
+                        break
+
+            # wall update + ball-wall collisions
+            for w in walls:
+                if not w.alive:
+                    continue
+                w.update()
+                if w.exploding:
+                    if w.explode_frames == 9:
+                        blast_angle = math.atan2(w.blast_dy, w.blast_dx)
+                        spread = math.pi / 3
+                        for b in alive_balls:
+                            if b.team_id == w.team_id:
+                                continue
+                            d = dist(w.x, w.y, b.x, b.y)
+                            if d > FORT_EXPLODE_RADIUS:
+                                continue
+                            angle_to = math.atan2(b.y - w.y, b.x - w.x)
+                            diff = (angle_to - blast_angle + math.pi) % (2 * math.pi) - math.pi
+                            if abs(diff) <= spread:
+                                b.take_damage(FORT_EXPLODE_DAMAGE)
+                                b.last_hit_by_team = w.team_id
+                                ddx = b.x - w.x
+                                ddy = b.y - w.y
+                                dd = max(d, 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 12.0)
+                    continue
+                x1, y1, x2, y2 = w.endpoints()
+                for b in alive_balls:
+                    if b.team_id == w.team_id:
+                        continue
+                    if point_near_segment(b.x, b.y, x1, y1, x2, y2, b.radius + w.thickness // 2):
+                        w.hp -= 1
+                        ddx = b.x - w.x
+                        ddy = b.y - w.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 6.0)
+
+            # ── death handling (protect the king logic) ──
+            for b in balls:
+                if b.hp <= 0 and b.alive:
+                    b.alive = False
+                    if getattr(b, 'is_minion', False):
+                        continue  # minions just die
+                    if b.is_king:
+                        # King dies → eliminate entire team
+                        tid = b.team_id
+                        eliminated_teams.add(tid)
+                        kings.pop(tid, None)
+                        # kill all teammates
+                        for mate in balls:
+                            if mate.team_id == tid and mate.alive:
+                                mate.alive = False
+                        # remove pending respawns for this team
+                        respawn_queue = [(rb, rf) for rb, rf in respawn_queue if rb.team_id != tid]
+                    else:
+                        # guard dies → respawn near king after delay
+                        if b.team_id not in eliminated_teams:
+                            respawn_queue.append((b, frame_count + PTK_GUARD_RESPAWN_DELAY))
+
+            # process respawn queue
+            for entry in respawn_queue[:]:
+                b, respawn_frame = entry
+                if frame_count >= respawn_frame:
+                    respawn_queue.remove(entry)
+                    # respawn near their king
+                    king = kings.get(b.team_id)
+                    if king is not None and king.alive:
+                        angle = random.uniform(0, 2 * math.pi)
+                        rx = king.x + math.cos(angle) * (BALL_RADIUS * 4)
+                        ry = king.y + math.sin(angle) * (BALL_RADIUS * 4)
+                        b.x = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, rx))
+                        b.y = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, ry))
+                    else:
+                        # king dead, don't respawn
+                        continue
+                    b.alive = True
+                    b.hp = b.max_hp
+                    b.vx = 0
+                    b.vy = 0
+                    b.bounce_timer = 0
+                    b.pinned_timer = 0
+                    b.carried_by_spear = False
+                    b.trapped_in = None
+                    b.hit_cooldown = 0
+                    b.last_hit_by_team = None
+                    # re-attach defend_ball to king
+                    king = kings.get(b.team_id)
+                    if king is not None:
+                        b.defend_ball = king
+                        b.position_leash = PTK_GUARD_LEASH
+
+            # clean up dead projectiles
+            spears = [s for s in spears if s.alive]
+            traps = [t for t in traps if t.alive]
+            bombs = [bm for bm in bombs if bm.alive]
+            bullets = [bl for bl in bullets if bl.alive]
+            arrows = [ar for ar in arrows if ar.alive]
+            orbs = [orb for orb in orbs if orb.alive]
+            ice_bolts = [ib for ib in ice_bolts if ib.alive]
+            walls = [w for w in walls if w.alive]
+
+            # ── win condition check ──
+            alive_king_teams = [tid for tid in team_ids if tid not in eliminated_teams and tid in kings and kings[tid].alive]
+            if len(alive_king_teams) == 1:
+                wtid = alive_king_teams[0]
+                winner_text = f"Team {wtid + 1} Wins!"
+                winner_color = TEAM_COLORS[wtid % len(TEAM_COLORS)]
+            elif len(alive_king_teams) == 0:
+                winner_text = "Draw!"
+                winner_color = (200, 200, 200)
+
+        # ── draw ──
+        screen.fill((20, 15, 25))  # dark purple background
+
+        # draw traps, bombs, walls, fences first (under balls)
+        for w in walls:
+            w.draw(screen)
+        for f in fences:
+            f.draw(screen)
+        for t in traps:
+            t.draw(screen)
+        for bm in bombs:
+            bm.draw(screen)
+
+        # draw balls
+        for b in balls:
+            if b.alive:
+                b.draw(screen)
+
+        # draw spears and projectiles on top
+        for s in spears:
+            s.draw(screen)
+        for bl in bullets:
+            bl.draw(screen)
+        for ar in arrows:
+            ar.draw(screen)
+        for orb in orbs:
+            orb.draw(screen)
+        for ib in ice_bolts:
+            ib.draw(screen)
+
+        # draw respawn indicators near king
+        for entry in respawn_queue:
+            b, respawn_frame = entry
+            frames_left = respawn_frame - frame_count
+            if frames_left > 0:
+                secs = frames_left / 60.0
+                color = TEAM_COLORS[b.team_id % len(TEAM_COLORS)]
+                dim_color = (color[0] // 3, color[1] // 3, color[2] // 3)
+                pygame.draw.circle(screen, dim_color, (int(b.x), int(b.y)), b.radius // 2)
+                timer_text = small_font.render(f"{secs:.1f}s", True, color)
+                screen.blit(timer_text, (int(b.x) - timer_text.get_width() // 2,
+                                         int(b.y) - b.radius - 10))
+
+        # draw eliminated team markers
+        for tid in eliminated_teams:
+            elim_txt = small_font.render(f"Team {tid + 1} ELIMINATED", True, PTK_ELIM_COLOR)
+            # draw at top center, stacked
+            idx = sorted(eliminated_teams).index(tid)
+            screen.blit(elim_txt, (WIDTH // 2 - elim_txt.get_width() // 2, 50 + idx * 18))
+
+        # ── HUD ──
+        y_hud = 8
+        for tid in team_ids:
+            color = TEAM_COLORS[tid % len(TEAM_COLORS)]
+            if tid in eliminated_teams:
+                color = PTK_ELIM_COLOR
+            king = kings.get(tid)
+            if king is not None and king.alive:
+                # King HP bar
+                label = font.render(f"Team {tid + 1} King:", True, color)
+                screen.blit(label, (10, y_hud))
+                bar_x = 10 + label.get_width() + 5
+                bar_w = 80
+                bar_h = 12
+                pygame.draw.rect(screen, (40, 40, 40), (bar_x, y_hud + 4, bar_w, bar_h))
+                hp_w = max(0, int((king.hp / king.max_hp) * bar_w))
+                hp_col = (0, 200, 0) if king.hp > 60 else (200, 200, 0) if king.hp > 30 else (200, 0, 0)
+                pygame.draw.rect(screen, hp_col, (bar_x, y_hud + 4, hp_w, bar_h))
+                hp_txt = small_font.render(f"{king.hp}/{king.max_hp}", True, (255, 255, 255))
+                screen.blit(hp_txt, (bar_x + bar_w + 5, y_hud + 2))
+                # guard count
+                alive_guards = len([b for b in balls if b.alive and b.team_id == tid and not b.is_king and not getattr(b, 'is_minion', False)])
+                respawning = len([e for e in respawn_queue if e[0].team_id == tid])
+                guard_txt = small_font.render(f"Guards: {alive_guards} (+{respawning})", True, color)
+                screen.blit(guard_txt, (bar_x + bar_w + 60, y_hud + 2))
+            elif tid in eliminated_teams:
+                label = font.render(f"Team {tid + 1}: ELIMINATED", True, PTK_ELIM_COLOR)
+                screen.blit(label, (10, y_hud))
+            y_hud += 22
+
+        # speed indicator
+        if paused:
+            speed_text = font.render("PAUSED  (Space)", True, (255, 255, 100))
+        else:
+            speed_text = font.render(f"Speed: {game_speed}x  (1/2/3/4)", True, (180, 180, 180))
+        screen.blit(speed_text, (WIDTH - speed_text.get_width() - 10, 8))
+
+        # mode label
+        mode_label = small_font.render("PROTECT THE KING", True, PTK_CROWN_COLOR)
+        screen.blit(mode_label, (WIDTH - mode_label.get_width() - 10, 28))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
+def tag_team_mode(team_configs, arena_idx=0):
+    global WIDTH, HEIGHT, screen, BALL_RADIUS, SWORD_LENGTH, TRAP_RADIUS
+    total_balls = len(team_configs)
+
+    aw, ah, a_hint = ARENA_SIZES[arena_idx]
+    WIDTH = aw
+    HEIGHT = ah
+
+    if total_balls > 6:
+        BALL_RADIUS = max(12, BASE_BALL_RADIUS - (total_balls - 6) * 2)
+    else:
+        BALL_RADIUS = BASE_BALL_RADIUS
+    SWORD_LENGTH = BALL_RADIUS * 2
+    TRAP_RADIUS = BALL_RADIUS * 4
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+    # organize balls by team
+    team_ids = sorted(set(cfg["team_id"] for cfg in team_configs))
+    team_rosters = {tid: [] for tid in team_ids}  # all balls per team (ordered)
+    all_balls = []
+    for cfg in team_configs:
+        tid = cfg["team_id"]
+        color = TEAM_COLORS[tid % len(TEAM_COLORS)]
+        margin = BALL_RADIUS + SWORD_LENGTH + 10
+        for _attempt in range(100):
+            x = random.randint(margin, WIDTH - margin)
+            y = random.randint(margin, HEIGHT - margin)
+            ok = all(dist(x, y, b.x, b.y) > BALL_RADIUS * 4 for b in all_balls if b.alive)
+            if ok:
+                break
+        b = Ball(x, y, color, tid, cfg["role"])
+        b.last_hit_by_team = None
+        all_balls.append(b)
+        team_rosters[tid].append(b)
+
+    # only first fighter per team starts alive; rest are benched
+    active_fighters = {}  # tid -> Ball
+    for tid in team_ids:
+        roster = team_rosters[tid]
+        active_fighters[tid] = roster[0]
+        for b in roster[1:]:
+            b.alive = False  # benched
+
+    eliminated_teams = set()
+    swap_queue = []  # (team_id, swap_frame) — pending fighter entries
+    spears = []
+    traps = []
+    bombs = []
+    bullets = []
+    arrows = []
+    orbs = []
+    ice_bolts = []
+    walls = []
+    fences = []
+    winner_text = None
+    winner_color = (255, 255, 255)
+    speed_options = [1, 2, 4, 10]
+    speed_index = 0
+    paused = False
+    frame_count = 0
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    tag_team_mode(team_configs, arena_idx)
+                    return
+                if event.key == pygame.K_m:
+                    return
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                if event.key == pygame.K_1:
+                    speed_index = 0
+                if event.key == pygame.K_2:
+                    speed_index = 1
+                if event.key == pygame.K_3:
+                    speed_index = 2
+                if event.key == pygame.K_4:
+                    speed_index = 3
+
+        game_speed = speed_options[speed_index]
+
+        if winner_text is not None:
+            screen.fill((20, 20, 30))
+            text = big_font.render(winner_text, True, winner_color)
+            r1 = font.render("R = Rematch  |  M = Menu", True, (180, 180, 180))
+            screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 30))
+            screen.blit(r1, (WIDTH // 2 - r1.get_width() // 2, HEIGHT // 2 + 30))
+            pygame.display.flip()
+            clock.tick(60)
+            continue
+
+        for _tick in range(game_speed):
+            if winner_text is not None or paused:
+                break
+
+            frame_count += 1
+            alive_balls = [b for b in all_balls if b.alive]
+
+            # tick down invulnerability
+            for b in alive_balls:
+                if b.tt_invuln > 0:
+                    b.tt_invuln -= 1
+
+            # AI + movement + abilities
+            for b in alive_balls:
+                target = b.find_target(alive_balls)
+                b.seek(target, alive_balls)
+                b.move()
+                b.try_throw_spear(target, spears)
+                b.try_place_trap(target, traps)
+                b.try_drop_bomb(target, bombs)
+                b.try_heal(alive_balls)
+                b.aim_shield(alive_balls)
+                b.try_fire_bullet(target, bullets)
+                b.try_fire_arrow(target, arrows)
+                b.try_cast_orb(target, orbs)
+                b.try_fire_ice_bolt(target, ice_bolts)
+                b.try_place_wall(target, walls, alive_balls)
+                b.try_place_fence(target, fences)
+
+            # fence update & damage
+            for f in fences:
+                if f.alive:
+                    f.update()
+                    for b in alive_balls:
+                        if b.alive:
+                            if f.check_damage(b):
+                                b.last_hit_by_team = f.team_id
+            fences = [f for f in fences if f.alive]
+
+            # summoner spawns minions
+            for b in alive_balls:
+                if b.role != "summoner" or b.summon_cooldown > 0:
+                    continue
+                b.minions = [m for m in b.minions if m.alive]
+                if len(b.minions) >= SUMMONER_MAX_MINIONS:
+                    continue
+                angle = random.uniform(0, 2 * math.pi)
+                mx2 = b.x + math.cos(angle) * (b.radius * 2.5)
+                my2 = b.y + math.sin(angle) * (b.radius * 2.5)
+                mx2 = max(BALL_RADIUS, min(WIDTH - BALL_RADIUS, mx2))
+                my2 = max(BALL_RADIUS, min(HEIGHT - BALL_RADIUS, my2))
+                minion = Ball(mx2, my2, b.color, b.team_id, "zombie")
+                minion.hp = SUMMONER_MINION_HP
+                minion.max_hp = SUMMONER_MINION_HP
+                minion.radius = max(8, int(BALL_RADIUS * SUMMONER_MINION_RADIUS_SCALE))
+                minion.is_minion = True
+                all_balls.append(minion)
+                b.minions.append(minion)
+                b.summon_cooldown = SUMMONER_COOLDOWN
+
+            # move spears
+            for s in spears:
+                if s.alive:
+                    s.move()
+
+            # spear hit detection
+            for s in spears:
+                if not s.alive or s.carried_ball is not None:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == s.team_id or b.carried_by_spear:
+                        continue
+                    if dist(s.x, s.y, b.x, b.y) <= b.radius + 5:
+                        if b.role == "mirror":
+                            s.dx = -s.dx
+                            s.dy = -s.dy
+                            s.angle = math.atan2(s.dy, s.dx)
+                            s.team_id = b.team_id
+                            s.x += s.dx * 2
+                            s.y += s.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(s.y - b.y, s.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                s.alive = False
+                                break
+                        b.take_damage(SPEAR_DAMAGE)
+                        b.last_hit_by_team = s.team_id
+                        if b.trapped_in is not None:
+                            b.trapped_in.captured_ball = None
+                            b.trapped_in.alive = False
+                            b.trapped_in = None
+                        b.carried_by_spear = True
+                        b.pinned_timer = 0
+                        b.vx = 0
+                        b.vy = 0
+                        s.carried_ball = b
+                        break
+
+            # trap trigger detection + update
+            for t in traps:
+                if not t.alive:
+                    continue
+                if t.captured_ball is not None:
+                    t.update()
+                    continue
+                for b in alive_balls:
+                    if b.team_id == t.team_id or b.trapped_in is not None or b.carried_by_spear or b.pinned_timer > 0:
+                        continue
+                    if dist(t.x, t.y, b.x, b.y) <= t.radius:
+                        t.captured_ball = b
+                        b.trapped_in = t
+                        angle = random.uniform(0, 2 * math.pi)
+                        b.vx = math.cos(angle) * 4.0
+                        b.vy = math.sin(angle) * 4.0
+                        b.bounce_timer = 0
+                        break
+
+            # move bullets
+            for bl in bullets:
+                if bl.alive:
+                    bl.move()
+
+            # bullet hit detection
+            for bl in bullets:
+                if not bl.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == bl.team_id:
+                        continue
+                    if dist(bl.x, bl.y, b.x, b.y) <= b.radius + 3:
+                        if b.role == "mirror":
+                            bl.dx = -bl.dx
+                            bl.dy = -bl.dy
+                            bl.angle = math.atan2(bl.dy, bl.dx)
+                            bl.team_id = b.team_id
+                            bl.x += bl.dx * 2
+                            bl.y += bl.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(bl.y - b.y, bl.x - b.x)
+                            if b.is_angle_in_shield(angle, attacker_role="sniper"):
+                                bl.alive = False
+                                break
+                        b.take_damage(SNIPER_DAMAGE)
+                        b.last_hit_by_team = bl.team_id
+                        bl.alive = False
+                        ddx = b.x - bl.x
+                        ddy = b.y - bl.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 5.0)
+                        break
+
+            # move arrows
+            for ar in arrows:
+                if ar.alive:
+                    ar.move()
+
+            # arrow hit detection
+            for ar in arrows:
+                if not ar.alive:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == ar.team_id:
+                        continue
+                    if dist(ar.x, ar.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ar.dx = -ar.dx
+                            ar.dy = -ar.dy
+                            ar.angle = math.atan2(ar.dy, ar.dx)
+                            ar.team_id = b.team_id
+                            ar.x += ar.dx * 2
+                            ar.y += ar.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ar.y - b.y, ar.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ar.alive = False
+                                break
+                        b.take_damage(ARCHER_DAMAGE)
+                        b.last_hit_by_team = ar.team_id
+                        ar.alive = False
+                        ddx = b.x - ar.x
+                        ddy = b.y - ar.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 3.0)
+                        break
+
+            # move orbs + hit detection
+            for orb in orbs:
+                if not orb.alive:
+                    continue
+                orb.move()
+                if orb.exploding:
+                    continue
+                for b in alive_balls:
+                    if b.team_id == orb.team_id:
+                        continue
+                    if dist(orb.x, orb.y, b.x, b.y) <= b.radius + 6:
+                        if b.role == "mirror":
+                            orb.dx = -orb.dx
+                            orb.dy = -orb.dy
+                            orb.team_id = b.team_id
+                            orb.x += orb.dx * 2
+                            orb.y += orb.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(orb.y - b.y, orb.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                orb.alive = False
+                                break
+                        b.take_damage(WIZARD_DAMAGE)
+                        b.last_hit_by_team = orb.team_id
+                        orb.exploding = True
+                        for other in alive_balls:
+                            if other is b or other.team_id == orb.team_id:
+                                continue
+                            if dist(orb.x, orb.y, other.x, other.y) <= WIZARD_SPLASH_RADIUS:
+                                other.take_damage(WIZARD_SPLASH_DAMAGE)
+                                other.last_hit_by_team = orb.team_id
+                        break
+
+            # move ice bolts + hit detection
+            for ib in ice_bolts:
+                if not ib.alive:
+                    continue
+                ib.move()
+                for b in alive_balls:
+                    if b.team_id == ib.team_id:
+                        continue
+                    if dist(ib.x, ib.y, b.x, b.y) <= b.radius + 4:
+                        if b.role == "mirror":
+                            ib.dx = -ib.dx
+                            ib.dy = -ib.dy
+                            ib.angle = math.atan2(ib.dy, ib.dx)
+                            ib.team_id = b.team_id
+                            ib.x += ib.dx * 2
+                            ib.y += ib.dy * 2
+                            break
+                        if b.role == "shield":
+                            angle = math.atan2(ib.y - b.y, ib.x - b.x)
+                            if b.is_angle_in_shield(angle):
+                                ib.alive = False
+                                break
+                        b.take_damage(ICE_MAGE_DAMAGE)
+                        b.last_hit_by_team = ib.team_id
+                        b.slow_timer = ICE_SLOW_DURATION
+                        ib.alive = False
+                        break
+
+            # bomb update + explosion damage
+            for bomb in bombs:
+                if not bomb.alive:
+                    continue
+                was_exploding = bomb.exploding
+                bomb.update()
+                if bomb.exploding and not was_exploding:
+                    for b in alive_balls:
+                        if b.team_id == bomb.team_id:
+                            continue
+                        d = dist(bomb.x, bomb.y, b.x, b.y)
+                        if d <= bomb.explosion_radius:
+                            b.take_damage(BOMB_DAMAGE)
+                            b.last_hit_by_team = bomb.team_id
+                            dx = b.x - bomb.x
+                            dy = b.y - bomb.y
+                            dd = max(d, 0.01)
+                            b.apply_knockback(dx / dd, dy / dd, BOMB_KNOCKBACK)
+
+            # body collisions
+            for i in range(len(alive_balls)):
+                for j in range(i + 1, len(alive_balls)):
+                    a, b = alive_balls[i], alive_balls[j]
+                    if a.team_id == b.team_id:
+                        if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                            resolve_collision(a, b)
+                        continue
+
+                    if dist(a.x, a.y, b.x, b.y) <= a.radius + b.radius:
+                        if a.role in ("zombie", "conqueror") and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ZOMBIE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 5
+                        if b.role in ("zombie", "conqueror") and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ZOMBIE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 5
+                        if a.role == "berserker" and a.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * a.rage_multiplier)
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(dmg)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 20
+                        if b.role == "berserker" and b.hit_cooldown == 0:
+                            dmg = int(BERSERKER_BASE_DAMAGE * b.rage_multiplier)
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(dmg)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 20
+                        if a.role == "shield" and a.hit_cooldown == 0:
+                            b.take_damage(SHIELD_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 10
+                        if b.role == "shield" and b.hit_cooldown == 0:
+                            a.take_damage(SHIELD_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 10
+                        if a.role == "ninja" and a.invisible and a.hit_cooldown == 0:
+                            b.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.invisible = False
+                            a.invis_timer = 0
+                            a.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            a.hit_cooldown = 30
+                        if b.role == "ninja" and b.invisible and b.hit_cooldown == 0:
+                            a.take_damage(NINJA_BACKSTAB_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.invisible = False
+                            b.invis_timer = 0
+                            b.invis_cooldown = NINJA_INVIS_COOLDOWN
+                            b.hit_cooldown = 30
+                        if a.role == "vampire" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(VAMPIRE_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                a.hp = min(a.max_hp, a.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            a.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if b.role == "vampire" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(VAMPIRE_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                b.hp = min(b.max_hp, b.hp + int(VAMPIRE_DAMAGE * VAMPIRE_LIFESTEAL))
+                            b.hit_cooldown = VAMPIRE_HIT_COOLDOWN
+                        if a.role == "tank" and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(TANK_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = TANK_HIT_COOLDOWN
+                        if b.role == "tank" and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(TANK_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = TANK_HIT_COOLDOWN
+                        if a.role == "assassin" and a.assassin_dashing > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(ASSASSIN_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = 30
+                            a.assassin_dashing = 0
+                            a.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = a.x - b.x
+                            ddy = a.y - b.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            a.assassin_retreat_dx = ddx / dd
+                            a.assassin_retreat_dy = ddy / dd
+                            a.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if b.role == "assassin" and b.assassin_dashing > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(ASSASSIN_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = 30
+                            b.assassin_dashing = 0
+                            b.assassin_dash_cooldown = ASSASSIN_DASH_COOLDOWN
+                            ddx = b.x - a.x
+                            ddy = b.y - a.y
+                            dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                            b.assassin_retreat_dx = ddx / dd
+                            b.assassin_retreat_dy = ddy / dd
+                            b.assassin_retreating = ASSASSIN_RETREAT_DURATION
+                        if a.role == "mirror" and a.hit_cooldown == 0:
+                            b.take_damage(MIRROR_DAMAGE)
+                            b.last_hit_by_team = a.team_id
+                            a.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if b.role == "mirror" and b.hit_cooldown == 0:
+                            a.take_damage(MIRROR_DAMAGE)
+                            a.last_hit_by_team = b.team_id
+                            b.hit_cooldown = MIRROR_HIT_COOLDOWN
+                        if a.role == "charger" and a.charging > 0 and a.hit_cooldown == 0:
+                            blocked = False
+                            if b.role == "shield":
+                                angle = math.atan2(a.y - b.y, a.x - b.x)
+                                blocked = b.is_angle_in_shield(angle)
+                            if not blocked:
+                                b.take_damage(CHARGER_DAMAGE)
+                                b.last_hit_by_team = a.team_id
+                                ddx = b.x - a.x
+                                ddy = b.y - a.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            a.hit_cooldown = 30
+                            a.charging = 0
+                            a.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if b.role == "charger" and b.charging > 0 and b.hit_cooldown == 0:
+                            blocked = False
+                            if a.role == "shield":
+                                angle = math.atan2(b.y - a.y, b.x - a.x)
+                                blocked = a.is_angle_in_shield(angle)
+                            if not blocked:
+                                a.take_damage(CHARGER_DAMAGE)
+                                a.last_hit_by_team = b.team_id
+                                ddx = a.x - b.x
+                                ddy = a.y - b.y
+                                dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                                a.apply_knockback(ddx / dd, ddy / dd, 15.0)
+                            b.hit_cooldown = 30
+                            b.charging = 0
+                            b.charge_cooldown = CHARGER_CHARGE_COOLDOWN
+                        if a.mimic_original and a.mimic_timer <= 0 and b.team_id != a.team_id:
+                            a.role = b.role
+                            a.speed = ROLE_SPEEDS.get(b.role, 3.0)
+                            a.mimic_display_role = b.role
+                            a.mimic_timer = MIMIC_COPY_DURATION
+                        if b.mimic_original and b.mimic_timer <= 0 and a.team_id != b.team_id:
+                            b.role = a.role
+                            b.speed = ROLE_SPEEDS.get(a.role, 3.0)
+                            b.mimic_display_role = a.role
+                            b.mimic_timer = MIMIC_COPY_DURATION
+                        resolve_collision(a, b)
+
+            # sword hits
+            for b in alive_balls:
+                if b.role != "swordsman" or b.hit_cooldown > 0:
+                    continue
+                sbx = b.x + math.cos(b.sword_angle) * b.radius
+                sby = b.y + math.sin(b.sword_angle) * b.radius
+                tx, ty = b.sword_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, sbx, sby, tx, ty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = 20
+                                break
+                        other.take_damage(SWORD_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = 20
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, 10.0)
+                        break
+
+            # hammer hits
+            for b in alive_balls:
+                if b.role != "hammer" or b.hit_cooldown > 0:
+                    continue
+                tx, ty = b.hammer_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if dist(other.x, other.y, tx, ty) <= other.radius + HAMMER_HEAD_SIZE:
+                        if other.role == "shield":
+                            angle = math.atan2(ty - other.y, tx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                                break
+                        other.take_damage(HAMMER_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = HAMMER_HIT_COOLDOWN
+                        ddx = other.x - b.x
+                        ddy = other.y - b.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        other.apply_knockback(ddx / dd, ddy / dd, HAMMER_KNOCKBACK)
+                        break
+
+            # chainsaw hits
+            for b in alive_balls:
+                if b.role != "chainsaw" or b.hit_cooldown > 0:
+                    continue
+                cbx = b.x + math.cos(b.chainsaw_angle) * b.radius
+                cby = b.y + math.sin(b.chainsaw_angle) * b.radius
+                ctx, cty = b.chainsaw_tip()
+                for other in alive_balls:
+                    if other is b or not other.alive or other.team_id == b.team_id:
+                        continue
+                    if point_near_segment(other.x, other.y, cbx, cby, ctx, cty, other.radius + 3):
+                        if other.role == "shield":
+                            angle = math.atan2(ctx - other.y, ctx - other.x)
+                            if other.is_angle_in_shield(angle):
+                                continue
+                        other.take_damage(CHAINSAW_DAMAGE)
+                        other.last_hit_by_team = b.team_id
+                        b.hit_cooldown = CHAINSAW_HIT_COOLDOWN
+                        break
+
+            # wall update + ball-wall collisions
+            for w in walls:
+                if not w.alive:
+                    continue
+                w.update()
+                if w.exploding:
+                    if w.explode_frames == 9:
+                        blast_angle = math.atan2(w.blast_dy, w.blast_dx)
+                        spread = math.pi / 3
+                        for b in alive_balls:
+                            if b.team_id == w.team_id:
+                                continue
+                            d = dist(w.x, w.y, b.x, b.y)
+                            if d > FORT_EXPLODE_RADIUS:
+                                continue
+                            angle_to = math.atan2(b.y - w.y, b.x - w.x)
+                            diff = (angle_to - blast_angle + math.pi) % (2 * math.pi) - math.pi
+                            if abs(diff) <= spread:
+                                b.take_damage(FORT_EXPLODE_DAMAGE)
+                                b.last_hit_by_team = w.team_id
+                                ddx = b.x - w.x
+                                ddy = b.y - w.y
+                                dd = max(d, 0.01)
+                                b.apply_knockback(ddx / dd, ddy / dd, 12.0)
+                    continue
+                x1, y1, x2, y2 = w.endpoints()
+                for b in alive_balls:
+                    if b.team_id == w.team_id:
+                        continue
+                    if point_near_segment(b.x, b.y, x1, y1, x2, y2, b.radius + w.thickness // 2):
+                        w.hp -= 1
+                        ddx = b.x - w.x
+                        ddy = b.y - w.y
+                        dd = max(math.sqrt(ddx * ddx + ddy * ddy), 0.01)
+                        b.apply_knockback(ddx / dd, ddy / dd, 6.0)
+
+            # ── death handling (tag team logic) ──
+            for b in all_balls:
+                if b.hp <= 0 and b.alive:
+                    b.alive = False
+                    if getattr(b, 'is_minion', False):
+                        continue
+                    tid = b.team_id
+                    # find next benched fighter for this team
+                    next_fighter = None
+                    for candidate in team_rosters.get(tid, []):
+                        if candidate is not b and not candidate.alive and candidate.hp > 0:
+                            # hp > 0 means benched (not yet fought and died permanently)
+                            next_fighter = candidate
+                            break
+                    if next_fighter is not None:
+                        swap_queue.append((tid, frame_count + TT_SWAP_DELAY, next_fighter))
+                    else:
+                        # no fighters left — check if team should be eliminated
+                        alive_on_team = any(m.alive for m in team_rosters.get(tid, []))
+                        pending = any(e[0] == tid for e in swap_queue)
+                        if not alive_on_team and not pending:
+                            eliminated_teams.add(tid)
+
+            # process swap queue — bring in next fighter
+            for entry in swap_queue[:]:
+                tid, swap_frame, next_b = entry
+                if frame_count >= swap_frame:
+                    swap_queue.remove(entry)
+                    if tid in eliminated_teams:
+                        continue
+                    # spawn at random edge
+                    edge = random.choice(["top", "bottom", "left", "right"])
+                    margin = BALL_RADIUS + 10
+                    if edge == "top":
+                        next_b.x = random.randint(margin, WIDTH - margin)
+                        next_b.y = margin
+                    elif edge == "bottom":
+                        next_b.x = random.randint(margin, WIDTH - margin)
+                        next_b.y = HEIGHT - margin
+                    elif edge == "left":
+                        next_b.x = margin
+                        next_b.y = random.randint(margin, HEIGHT - margin)
+                    else:
+                        next_b.x = WIDTH - margin
+                        next_b.y = random.randint(margin, HEIGHT - margin)
+                    next_b.alive = True
+                    next_b.hp = next_b.max_hp
+                    next_b.vx = 0
+                    next_b.vy = 0
+                    next_b.bounce_timer = 0
+                    next_b.pinned_timer = 0
+                    next_b.carried_by_spear = False
+                    next_b.trapped_in = None
+                    next_b.hit_cooldown = 0
+                    next_b.last_hit_by_team = None
+                    next_b.tt_invuln = TT_ENTRANCE_INVULN
+                    active_fighters[tid] = next_b
+
+            # clean up dead projectiles
+            spears = [s for s in spears if s.alive]
+            traps = [t for t in traps if t.alive]
+            bombs = [bm for bm in bombs if bm.alive]
+            bullets = [bl for bl in bullets if bl.alive]
+            arrows = [ar for ar in arrows if ar.alive]
+            orbs = [orb for orb in orbs if orb.alive]
+            ice_bolts = [ib for ib in ice_bolts if ib.alive]
+            walls = [w for w in walls if w.alive]
+
+            # ── win condition ──
+            alive_team_ids = set()
+            for tid in team_ids:
+                if tid in eliminated_teams:
+                    continue
+                has_alive = any(b.alive for b in team_rosters[tid])
+                has_pending = any(e[0] == tid for e in swap_queue)
+                has_benched = any(not b.alive and b.hp > 0 for b in team_rosters[tid] if not getattr(b, 'is_minion', False))
+                if has_alive or has_pending or has_benched:
+                    alive_team_ids.add(tid)
+                else:
+                    eliminated_teams.add(tid)
+            if len(alive_team_ids) == 1:
+                wtid = list(alive_team_ids)[0]
+                winner_text = f"Team {wtid + 1} Wins!"
+                winner_color = TEAM_COLORS[wtid % len(TEAM_COLORS)]
+            elif len(alive_team_ids) == 0:
+                winner_text = "Draw!"
+                winner_color = (200, 200, 200)
+
+        # ── draw ──
+        screen.fill((25, 20, 30))
+
+        # draw traps, bombs, walls, fences
+        for w in walls:
+            w.draw(screen)
+        for f in fences:
+            f.draw(screen)
+        for t in traps:
+            t.draw(screen)
+        for bm in bombs:
+            bm.draw(screen)
+
+        # draw alive balls with invuln glow
+        for b in all_balls:
+            if b.alive:
+                if b.tt_invuln > 0:
+                    # pulsing white shield glow
+                    pulse = int(40 * math.sin(frame_count * 0.2))
+                    pygame.draw.circle(screen, (200 + pulse, 200 + pulse, 255),
+                                       (int(b.x), int(b.y)), b.radius + 5, 2)
+                b.draw(screen)
+
+        # draw projectiles
+        for s in spears:
+            s.draw(screen)
+        for bl in bullets:
+            bl.draw(screen)
+        for ar in arrows:
+            ar.draw(screen)
+        for orb in orbs:
+            orb.draw(screen)
+        for ib in ice_bolts:
+            ib.draw(screen)
+
+        # draw swap countdown indicators
+        for entry in swap_queue:
+            tid, swap_frame, next_b = entry
+            frames_left = swap_frame - frame_count
+            if frames_left > 0:
+                secs = frames_left / 60.0
+                color = TEAM_COLORS[tid % len(TEAM_COLORS)]
+                swap_txt = font.render(f"Team {tid + 1}: Next in {secs:.1f}s ({next_b.role.capitalize()})", True, color)
+                idx = [e[0] for e in swap_queue].index(tid)
+                screen.blit(swap_txt, (WIDTH // 2 - swap_txt.get_width() // 2, HEIGHT - 40 - idx * 22))
+
+        # ── HUD: team rosters ──
+        y_hud = 8
+        for tid in team_ids:
+            color = TEAM_COLORS[tid % len(TEAM_COLORS)]
+            if tid in eliminated_teams:
+                color = PTK_ELIM_COLOR
+            roster = team_rosters[tid]
+            label = font.render(f"Team {tid + 1}:", True, color)
+            screen.blit(label, (10, y_hud))
+            rx = 10 + label.get_width() + 5
+            for b in roster:
+                if getattr(b, 'is_minion', False):
+                    continue
+                if b.alive:
+                    # active fighter — filled circle
+                    pygame.draw.circle(screen, color, (rx + 8, y_hud + 10), 8)
+                    role_txt = small_font.render(b.role[:3].upper(), True, (255, 255, 255))
+                    screen.blit(role_txt, (rx + 1, y_hud + 3))
+                elif b.hp > 0:
+                    # benched — outline circle
+                    pygame.draw.circle(screen, color, (rx + 8, y_hud + 10), 8, 2)
+                    role_txt = small_font.render(b.role[:3].upper(), True, color)
+                    screen.blit(role_txt, (rx + 1, y_hud + 3))
+                else:
+                    # dead — X
+                    pygame.draw.circle(screen, PTK_ELIM_COLOR, (rx + 8, y_hud + 10), 8, 1)
+                    pygame.draw.line(screen, PTK_ELIM_COLOR, (rx + 3, y_hud + 5), (rx + 13, y_hud + 15), 2)
+                    pygame.draw.line(screen, PTK_ELIM_COLOR, (rx + 13, y_hud + 5), (rx + 3, y_hud + 15), 2)
+                rx += 22
+            if tid in eliminated_teams:
+                elim = small_font.render("ELIMINATED", True, PTK_ELIM_COLOR)
+                screen.blit(elim, (rx + 5, y_hud + 2))
+            y_hud += 22
+
+        # speed indicator
+        if paused:
+            speed_text = font.render("PAUSED  (Space)", True, (255, 255, 100))
+        else:
+            speed_text = font.render(f"Speed: {game_speed}x  (1/2/3/4)", True, (180, 180, 180))
+        screen.blit(speed_text, (WIDTH - speed_text.get_width() // 2 - 100, 8))
+
+        # mode label
+        mode_label = small_font.render("TAG TEAM", True, (255, 180, 50))
+        screen.blit(mode_label, (WIDTH - mode_label.get_width() - 10, 28))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
 def main():
     global WIDTH, HEIGHT, screen
     saved_teams = None
@@ -8044,6 +13029,52 @@ def main():
                 for role in sync_teams[i]:
                     koth_configs.append({"team_id": i, "role": role})
             king_of_the_hill(koth_configs, saved_arena_idx)
+        elif team_configs == "infection":
+            sync_teams = saved_teams
+            num_teams = saved_num_teams
+            inf_configs = []
+            ball_id = 0
+            for i in range(num_teams):
+                for role in sync_teams[i]:
+                    inf_configs.append({"team_id": ball_id, "role": role})
+                    ball_id += 1
+            infection_mode(inf_configs, saved_arena_idx)
+        elif team_configs == "hunger_games":
+            sync_teams = saved_teams
+            num_teams = saved_num_teams
+            hg_configs = []
+            ball_id = 0
+            for i in range(num_teams):
+                for role in sync_teams[i]:
+                    hg_configs.append({"team_id": ball_id, "role": role})
+                    ball_id += 1
+            hunger_games_mode(hg_configs, saved_arena_idx)
+        elif team_configs == "evolution":
+            sync_teams = saved_teams
+            num_teams = saved_num_teams
+            evo_configs = []
+            ball_id = 0
+            for i in range(num_teams):
+                for role in sync_teams[i]:
+                    evo_configs.append({"team_id": ball_id, "role": role})
+                    ball_id += 1
+            evolution_mode(evo_configs, saved_arena_idx)
+        elif team_configs == "protect_the_king":
+            sync_teams = saved_teams
+            num_teams = saved_num_teams
+            ptk_configs = []
+            for i in range(num_teams):
+                for role in sync_teams[i]:
+                    ptk_configs.append({"team_id": i, "role": role})
+            protect_the_king(ptk_configs, saved_arena_idx)
+        elif team_configs == "tag_team":
+            sync_teams = saved_teams
+            num_teams = saved_num_teams
+            tt_configs = []
+            for i in range(num_teams):
+                for role in sync_teams[i]:
+                    tt_configs.append({"team_id": i, "role": role})
+            tag_team_mode(tt_configs, saved_arena_idx)
         else:
             game(team_configs, saved_arena_idx)
 
