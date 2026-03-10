@@ -14,8 +14,11 @@ class Pygame2Recipe(_OrigPygameRecipe):
             for f in files:
                 if f.endswith('.c') or f.endswith('.h'):
                     filepath = os.path.join(root, f)
-                    with open(filepath, 'r') as fh:
-                        content = fh.read()
+                    try:
+                        with open(filepath, 'r', encoding='utf-8', errors='ignore') as fh:
+                            content = fh.read()
+                    except Exception:
+                        continue
                     if '#include "longintrepr.h"' in content:
                         new_content = content.replace(
                             '#include "longintrepr.h"',
