@@ -43,7 +43,7 @@ jobs:
             --entrypoint bash \
             -v "$PWD":/home/user/hostcwd \
             kivy/buildozer:latest \
-            -c "git config --global --add safe.directory /home/user/hostcwd && cd /home/user/hostcwd && git remote get-url origin 2>/dev/null || git remote add origin https://github.com/devongoodman/Ball_Fights.git 2>/dev/null || true && yes | buildozer -v android release"
+            -c "git config --global --add safe.directory '*' && cd /home/user/hostcwd && P4A_DIR=/home/user/hostcwd/.buildozer/android/platform/python-for-android && if [ -d \"\$P4A_DIR\" ] && ! git -C \"\$P4A_DIR\" remote get-url origin >/dev/null 2>&1; then rm -rf \"\$P4A_DIR\"; fi && yes | buildozer -v android release"
 
       - name: Sign APK
         env:
