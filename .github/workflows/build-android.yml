@@ -49,6 +49,8 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
+          # Fix permissions (Docker creates files as root)
+          sudo chown -R runner:runner bin/
           echo "Contents of bin/:"
           ls -la bin/
 
