@@ -19,9 +19,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .buildozer
-          key: buildozer-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-v2-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-
+            buildozer-v2-
 
       - name: Generate keystore
         env:
@@ -43,7 +43,7 @@ jobs:
             --entrypoint bash \
             -v "$PWD":/home/user/hostcwd \
             kivy/buildozer:latest \
-            -c "git config --global --add safe.directory '*' && cd /home/user/hostcwd && P4A_DIR=/home/user/hostcwd/.buildozer/android/platform/python-for-android && if [ -d \"\$P4A_DIR\" ] && ! git -C \"\$P4A_DIR\" remote get-url origin >/dev/null 2>&1; then rm -rf \"\$P4A_DIR\"; fi && yes | buildozer -v android release"
+            -c "git config --global --add safe.directory '*' && cd /home/user/hostcwd && P4A_DIR=/home/user/hostcwd/.buildozer/android/platform/python-for-android && if [ -d \"\$P4A_DIR/.git\" ]; then git -C \"\$P4A_DIR\" remote get-url origin >/dev/null 2>&1 || git -C \"\$P4A_DIR\" remote add origin https://github.com/kivy/python-for-android.git 2>/dev/null || true; fi && yes | buildozer -v android release"
 
       - name: Sign APK
         env:
