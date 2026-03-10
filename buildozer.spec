@@ -11,7 +11,7 @@ p4a.local_recipes = ./p4a-recipes
 
 # Android configuration
 android.permissions = INTERNET
-android.api = 34
+android.api = 35
 android.minapi = 21
 android.ndk_api = 21
 android.archs = arm64-v8a
