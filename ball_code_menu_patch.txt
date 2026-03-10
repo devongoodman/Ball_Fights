@@ -1,0 +1,12 @@
+# PATCH: Add main() that calls interactive_mode() if selected from menu
+
+def main():
+    global WIDTH, HEIGHT, screen
+    while True:
+        WIDTH, HEIGHT = BASE_WIDTH, BASE_HEIGHT
+        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        menu_result = setup_menu()  # This should return 'interactive' if that mode is chosen
+        if menu_result == "interactive":
+            interactive_mode()
+        else:
+            game(menu_result)

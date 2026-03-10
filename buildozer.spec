@@ -7,6 +7,7 @@ source.include_exts = py,png,jpg,kv,atlas,ttf
 version = 1.0.0
 requirements = python3,pygame
 p4a.bootstrap = sdl2
+p4a.local_recipes = ./p4a-recipes
 
 # Android configuration
 android.permissions = INTERNET
