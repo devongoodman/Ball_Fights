@@ -15,20 +15,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cache Buildozer global directory
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            git \
+            python3-pip \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libtinfo5 \
+            cmake \
+            libffi-dev \
+            libssl-dev \
+            unzip \
+            openjdk-17-jdk
+
+      - name: Install Buildozer and Cython
+        run: |
+          pip install --upgrade pip
+          pip install buildozer cython virtualenv
+
+      - name: Cache Buildozer directory
         uses: actions/cache@v4
         with:
-          path: .buildozer
+          path: |
+            .buildozer
+            ~/.buildozer
           key: buildozer-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
             buildozer-
 
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
-        with:
-          command: buildozer android debug
-          buildozer_version: stable
+      - name: Build APK
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+        run: |
+          yes | buildozer -v android debug 2>&1 | tail -500
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
