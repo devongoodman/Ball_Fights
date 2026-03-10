@@ -1,10 +1,10 @@
 """Custom pygame recipe that patches longintrepr.h for Python 3.11+"""
 import os
 import glob
-from pythonforandroid.recipes.pygame import PygameRecipe as _OrigPygameRecipe
+from pythonforandroid.recipes.pygame import Pygame2Recipe as _OrigPygameRecipe
 
 
-class PygameRecipe(_OrigPygameRecipe):
+class Pygame2Recipe(_OrigPygameRecipe):
     def prebuild_arch(self, arch):
         super().prebuild_arch(arch)
         # Patch all .c files that include longintrepr.h
@@ -30,4 +30,4 @@ class PygameRecipe(_OrigPygameRecipe):
                         print(f"Patched longintrepr.h in {filepath}")
 
 
-recipe = PygameRecipe()
+recipe = Pygame2Recipe()
