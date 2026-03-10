@@ -43,7 +43,7 @@ jobs:
             --entrypoint bash \
             -v "$PWD":/home/user/hostcwd \
             kivy/buildozer:latest \
-            -c "cd /home/user/hostcwd && yes | buildozer -v android release"
+            -c "git config --global --add safe.directory /home/user/hostcwd && cd /home/user/hostcwd && yes | buildozer -v android release"
 
       - name: Sign APK
         env:
