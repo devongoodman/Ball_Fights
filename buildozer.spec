@@ -5,8 +5,9 @@ package.domain = com.devongoodman
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf
 version = 1.0.0
-requirements = python3==3.10.13,pygame==2.5.2
+requirements = python3,pygame==2.6.1
 p4a.bootstrap = sdl2
+p4a.branch = develop
 
 # Android configuration
 android.permissions = INTERNET
