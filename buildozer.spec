@@ -5,8 +5,7 @@ package.domain = com.devongoodman
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf
 version = 1.0.0
-requirements = python3,pygame-ce
-p4a.local_recipes = ./p4a-recipes
+requirements = python3,pygame
 p4a.bootstrap = sdl2
 
 # Android configuration
