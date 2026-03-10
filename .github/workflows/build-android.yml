@@ -26,15 +26,14 @@ jobs:
       - name: Generate keystore
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           keytool -genkeypair \
             -alias "$KEY_ALIAS" \
             -keyalg RSA -keysize 2048 -validity 10000 \
+            -storetype PKCS12 \
             -keystore ballfights.keystore \
             -storepass "$KEYSTORE_PASSWORD" \
-            -keypass "$KEY_PASSWORD" \
             -dname "CN=Devon Goodman, OU=Dev, O=DevonGoodman, L=Unknown, ST=Unknown, C=US"
 
       - name: Build release APK with Buildozer Docker
@@ -48,7 +47,6 @@ jobs:
       - name: Sign APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           # Find the unsigned release APK
@@ -61,7 +59,6 @@ jobs:
           echo "Signing: $UNSIGNED_APK"
 
           # Sign with apksigner (from Android SDK build-tools)
-          # Ubuntu runner has Android SDK at ANDROID_HOME
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
           echo "Using build-tools: $BUILD_TOOLS"
 
@@ -69,7 +66,7 @@ jobs:
             --ks ballfights.keystore \
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$KEYSTORE_PASSWORD" \
-            --key-pass "pass:$KEY_PASSWORD" \
+            --key-pass "pass:$KEYSTORE_PASSWORD" \
             --out bin/ballfights-release.apk \
             "$UNSIGNED_APK"
 
