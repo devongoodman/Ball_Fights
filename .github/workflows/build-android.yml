@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-android:
-    name: Build Signed Release APK
+    name: Build Signed Release
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -36,7 +36,7 @@ jobs:
             -storepass "$KEYSTORE_PASSWORD" \
             -dname "CN=Devon Goodman, OU=Dev, O=DevonGoodman, L=Unknown, ST=Unknown, C=US"
 
-      - name: Build release APK with Buildozer Docker
+      - name: Build release with Buildozer Docker
         run: |
           docker run --rm \
             --entrypoint bash \
@@ -44,37 +44,48 @@ jobs:
             kivy/buildozer:latest \
             -c "git config --global --add safe.directory '*' && cd /home/user/hostcwd && P4A_DIR=/home/user/hostcwd/.buildozer/android/platform/python-for-android && if [ -d \"\$P4A_DIR/.git\" ]; then git -C \"\$P4A_DIR\" remote get-url origin >/dev/null 2>&1 || git -C \"\$P4A_DIR\" remote add origin https://github.com/kivy/python-for-android.git 2>/dev/null || true; fi && yes | buildozer -v android release"
 
-      - name: Sign APK
+      - name: Sign release
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          # Find the unsigned release APK
-          UNSIGNED_APK=$(find bin -name "*-release-unsigned.apk" | head -1)
-          if [ -z "$UNSIGNED_APK" ]; then
-            echo "No unsigned APK found, checking for other APKs..."
-            ls -la bin/
-            UNSIGNED_APK=$(find bin -name "*.apk" | head -1)
-          fi
-          echo "Signing: $UNSIGNED_APK"
+          echo "Contents of bin/:"
+          ls -la bin/
 
-          # Sign with apksigner (from Android SDK build-tools)
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
           echo "Using build-tools: $BUILD_TOOLS"
 
-          "${BUILD_TOOLS}apksigner" sign \
-            --ks ballfights.keystore \
-            --ks-key-alias "$KEY_ALIAS" \
-            --ks-pass "pass:$KEYSTORE_PASSWORD" \
-            --key-pass "pass:$KEYSTORE_PASSWORD" \
-            --out bin/ballfights-release.apk \
-            "$UNSIGNED_APK"
+          # Sign AAB if present (Google Play prefers AAB)
+          AAB=$(find bin -name "*.aab" | head -1)
+          if [ -n "$AAB" ]; then
+            echo "Signing AAB: $AAB"
+            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+              -keystore ballfights.keystore \
+              -storepass "$KEYSTORE_PASSWORD" \
+              "$AAB" "$KEY_ALIAS"
+            cp "$AAB" bin/ballfights-release.aab
+            echo "AAB signed successfully!"
+          fi
 
-          "${BUILD_TOOLS}apksigner" verify bin/ballfights-release.apk
-          echo "APK signed successfully!"
+          # Sign APK if present
+          APK=$(find bin -name "*.apk" | head -1)
+          if [ -n "$APK" ]; then
+            echo "Signing APK: $APK"
+            "${BUILD_TOOLS}apksigner" sign \
+              --ks ballfights.keystore \
+              --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass "pass:$KEYSTORE_PASSWORD" \
+              --key-pass "pass:$KEYSTORE_PASSWORD" \
+              --out bin/ballfights-release.apk \
+              "$APK"
+            "${BUILD_TOOLS}apksigner" verify bin/ballfights-release.apk
+            echo "APK signed successfully!"
+          fi
 
-      - name: Upload Signed APK
+      - name: Upload signed release
         uses: actions/upload-artifact@v4
         with:
-          name: ball-fights-release-apk
-          path: bin/ballfights-release.apk
+          name: ball-fights-release
+          path: |
+            bin/ballfights-release.aab
+            bin/ballfights-release.apk
