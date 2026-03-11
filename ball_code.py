@@ -83,13 +83,24 @@ def stop_recording(proc):
 BASE_WIDTH, BASE_HEIGHT = 600, 450
 if ANDROID:
     _info = pygame.display.Info()
-    WIDTH, HEIGHT = _info.current_w, _info.current_h
-    if WIDTH <= 0 or HEIGHT <= 0:
-        WIDTH, HEIGHT = 1280, 720
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
+    _ANDROID_W, _ANDROID_H = _info.current_w, _info.current_h
+    if _ANDROID_W <= 0 or _ANDROID_H <= 0:
+        _ANDROID_W, _ANDROID_H = 1280, 720
+    WIDTH, HEIGHT = _ANDROID_W, _ANDROID_H
+    BASE_WIDTH, BASE_HEIGHT = _ANDROID_W, _ANDROID_H
 else:
+    _ANDROID_W, _ANDROID_H = 0, 0
     WIDTH, HEIGHT = BASE_WIDTH, BASE_HEIGHT
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+
+def _set_mode(size, flags=0):
+    """Wrapper: always fullscreen on Android."""
+    if ANDROID:
+        return pygame.display.set_mode((_ANDROID_W, _ANDROID_H), pygame.FULLSCREEN)
+    return pygame.display.set_mode(size, flags)
+
+
+screen = _set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Ball Fights")
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 18)
@@ -1008,7 +1019,7 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
             if event.type == pygame.MOUSEWHEEL and search_open is not None:
                 filtered = [r for r in ROLES if search_text.lower() in r.lower()]
                 max_scroll = max(0, len(filtered) - 8)
@@ -1142,7 +1153,7 @@ def setup_menu(saved_teams=None, saved_num_teams=None, saved_arena_idx=None, sav
         menu_w = max(BASE_WIDTH, COL_W * use_cols + 250)
         new_size = (menu_w, menu_h)
         if new_size != prev_size:
-            screen = pygame.display.set_mode(new_size)
+            screen = _set_mode(new_size)
             prev_size = new_size
 
         randomize_btn = Button(menu_w // 2 - 195, menu_h - 70, 110, 45, "RANDOMIZE", (90, 60, 120))
@@ -3481,7 +3492,7 @@ def game(team_configs, arena_idx=0):
         BALL_RADIUS = BASE_BALL_RADIUS
     SWORD_LENGTH = BALL_RADIUS * 2
     TRAP_RADIUS = BALL_RADIUS * 4
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = _set_mode((WIDTH, HEIGHT))
 
     rec_proc = start_recording(WIDTH, HEIGHT) if recording else None
 
@@ -3526,7 +3537,7 @@ def game(team_configs, arena_idx=0):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
                     stop_recording(rec_proc)
@@ -4300,7 +4311,7 @@ def tournament_menu(arena_idx):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
             if event.type == pygame.MOUSEWHEEL:
                 if search_open is not None:
                     filtered = [r for r in ROLES if search_text.lower() in r.lower()]
@@ -4400,7 +4411,7 @@ def tournament_menu(arena_idx):
         menu_h = max(BASE_HEIGHT, 500)
         new_size = (menu_w, menu_h)
         if new_size != prev_size:
-            screen = pygame.display.set_mode(new_size)
+            screen = _set_mode(new_size)
             prev_size = new_size
 
         back_btn = Button(15, 15, 70, 30, "BACK", (80, 60, 60))
@@ -4607,14 +4618,14 @@ def run_tournament(bracket, arena_idx, realistic=False):
         """Display bracket and wait for click/key to continue."""
         bw = 800
         bh = max(500, len(rounds[0]) * 50 + 200)
-        screen_local = pygame.display.set_mode((bw, bh))
+        screen_local = _set_mode((bw, bh))
 
         waiting = True
         while waiting:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
-                    sys.exit()
+                    return
                 if event.type == pygame.MOUSEBUTTONDOWN or event.type == pygame.KEYDOWN:
                     waiting = False
 
@@ -4698,7 +4709,7 @@ def run_tournament(bracket, arena_idx, realistic=False):
         BALL_RADIUS = br
         SWORD_LENGTH = BALL_RADIUS * 2
         TRAP_RADIUS = BALL_RADIUS * 4
-        screen_g = pygame.display.set_mode((WIDTH, HEIGHT))
+        screen_g = _set_mode((WIDTH, HEIGHT))
 
         t_rec_proc = start_recording(WIDTH, HEIGHT) if t_recording else None
 
@@ -4743,7 +4754,7 @@ def run_tournament(bracket, arena_idx, realistic=False):
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
-                    sys.exit()
+                    return
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_x:
                         mods = pygame.key.get_mods()
@@ -4795,7 +4806,7 @@ def run_tournament(bracket, arena_idx, realistic=False):
                     for ev in pygame.event.get():
                         if ev.type == pygame.QUIT:
                             pygame.quit()
-                            sys.exit()
+                            return
                         if ev.type == pygame.MOUSEBUTTONDOWN or ev.type == pygame.KEYDOWN:
                             wait = False
                     clock.tick(60)
@@ -5749,7 +5760,7 @@ def interactive_mode():
     def role_select_screen():
         global WIDTH, HEIGHT, screen
         WIDTH, HEIGHT = 900, 600
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        screen = _set_mode((WIDTH, HEIGHT))
         selected = None
 
         ROLE_DESCS = {
@@ -5783,7 +5794,7 @@ def interactive_mode():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
-                    sys.exit()
+                    return
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     # check role clicks
                     cols = 6
@@ -5851,7 +5862,7 @@ def interactive_mode():
             BALL_RADIUS = BASE_BALL_RADIUS
         SWORD_LENGTH = BALL_RADIUS * 2
         TRAP_RADIUS = BALL_RADIUS * 4
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        screen = _set_mode((WIDTH, HEIGHT))
 
         # create ball objects for player team, placed in left third
         color = TEAM_COLORS[0]
@@ -5916,7 +5927,7 @@ def interactive_mode():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
-                    sys.exit()
+                    return
 
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
@@ -6274,7 +6285,7 @@ def interactive_mode():
         content_h = max(500, 160 + max(len(player_team), len(next_enemies)) * 48 + 140)
         shop_h = min(content_h, MAX_SHOP_H)
         WIDTH, HEIGHT = shop_w, shop_h
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        screen = _set_mode((WIDTH, HEIGHT))
 
         selected_ball = None
         scroll_offset = 0  # shop role scroll
@@ -6295,7 +6306,7 @@ def interactive_mode():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
-                    sys.exit()
+                    return
 
                 # cheat code input mode
                 if cheat_input_active:
@@ -6591,7 +6602,7 @@ def interactive_mode():
             BALL_RADIUS = BASE_BALL_RADIUS
         SWORD_LENGTH = BALL_RADIUS * 2
         TRAP_RADIUS = BALL_RADIUS * 4
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        screen = _set_mode((WIDTH, HEIGHT))
 
         # spawn player balls at pre-placed positions (from setup phase)
         color_p = TEAM_COLORS[0]
@@ -6657,7 +6668,7 @@ def interactive_mode():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
-                    sys.exit()
+                    return
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_SPACE:
                         paused = not paused
@@ -7372,7 +7383,7 @@ def interactive_mode():
     def surrender_screen(player_team, enemy_roles, gold, wave):
         global WIDTH, HEIGHT, screen
         WIDTH, HEIGHT = 600, 450
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        screen = _set_mode((WIDTH, HEIGHT))
 
         accept_btn = pygame.Rect(WIDTH // 2 - 160, HEIGHT - 80, 140, 40)
         decline_btn = pygame.Rect(WIDTH // 2 + 20, HEIGHT - 80, 140, 40)
@@ -7382,7 +7393,7 @@ def interactive_mode():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
-                    sys.exit()
+                    return
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if accept_btn.collidepoint(mx, my):
                         # accept: gain enemy units, or gold if team is full
@@ -7479,7 +7490,7 @@ def interactive_mode():
             if not won or not survivors:
                 # game over screen
                 WIDTH, HEIGHT = 600, 450
-                screen = pygame.display.set_mode((WIDTH, HEIGHT))
+                screen = _set_mode((WIDTH, HEIGHT))
                 screen.fill((30, 10, 10))
                 t = big_font.render("Game Over!", True, (255, 80, 80))
                 wv = font.render(f"You reached Wave {wave}", True, (255, 255, 255))
@@ -7495,7 +7506,7 @@ def interactive_mode():
                     for ev in pygame.event.get():
                         if ev.type == pygame.QUIT:
                             pygame.quit()
-                            sys.exit()
+                            return
                         if ev.type == pygame.MOUSEBUTTONDOWN or ev.type == pygame.KEYDOWN:
                             waiting = False
                     clock.tick(60)
@@ -7527,7 +7538,7 @@ def king_of_the_hill(team_configs, arena_idx=0):
         BALL_RADIUS = BASE_BALL_RADIUS
     SWORD_LENGTH = BALL_RADIUS * 2
     TRAP_RADIUS = BALL_RADIUS * 4
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = _set_mode((WIDTH, HEIGHT))
 
     balls = spawn_balls(team_configs)
     spears = []
@@ -7563,7 +7574,7 @@ def king_of_the_hill(team_configs, arena_idx=0):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
                     king_of_the_hill(team_configs, arena_idx)
@@ -8315,7 +8326,7 @@ def infection_mode(team_configs, arena_idx=0):
         BALL_RADIUS = BASE_BALL_RADIUS
     SWORD_LENGTH = BALL_RADIUS * 2
     TRAP_RADIUS = BALL_RADIUS * 4
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = _set_mode((WIDTH, HEIGHT))
 
     balls = spawn_balls(team_configs)
     spears = []
@@ -8514,7 +8525,7 @@ def infection_mode(team_configs, arena_idx=0):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
                     infection_mode(team_configs, arena_idx)
@@ -9328,7 +9339,7 @@ def hunger_games_mode(team_configs, arena_idx=0):
         BALL_RADIUS = BASE_BALL_RADIUS
     SWORD_LENGTH = BALL_RADIUS * 2
     TRAP_RADIUS = BALL_RADIUS * 4
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = _set_mode((WIDTH, HEIGHT))
 
     cx, cy = WIDTH // 2, HEIGHT // 2
     spawn_radius = min(WIDTH, HEIGHT) * 0.35
@@ -9598,7 +9609,7 @@ def hunger_games_mode(team_configs, arena_idx=0):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
                     hunger_games_mode(team_configs, arena_idx)
@@ -10530,7 +10541,7 @@ def evolution_mode(team_configs, arena_idx=0):
         BALL_RADIUS = BASE_BALL_RADIUS
     SWORD_LENGTH = BALL_RADIUS * 2
     TRAP_RADIUS = BALL_RADIUS * 4
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = _set_mode((WIDTH, HEIGHT))
 
     def apply_tier(b, new_tier):
         new_tier = max(0, min(EVO_MAX_TIER, new_tier))
@@ -10599,7 +10610,7 @@ def evolution_mode(team_configs, arena_idx=0):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
                     evolution_mode(team_configs, arena_idx)
@@ -11370,7 +11381,7 @@ def protect_the_king(team_configs, arena_idx=0):
         BALL_RADIUS = BASE_BALL_RADIUS
     SWORD_LENGTH = BALL_RADIUS * 2
     TRAP_RADIUS = BALL_RADIUS * 4
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = _set_mode((WIDTH, HEIGHT))
 
     balls = spawn_balls(team_configs)
     spears = []
@@ -11417,7 +11428,7 @@ def protect_the_king(team_configs, arena_idx=0):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
                     protect_the_king(team_configs, arena_idx)
@@ -12190,7 +12201,7 @@ def tag_team_mode(team_configs, arena_idx=0):
         BALL_RADIUS = BASE_BALL_RADIUS
     SWORD_LENGTH = BALL_RADIUS * 2
     TRAP_RADIUS = BALL_RADIUS * 4
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = _set_mode((WIDTH, HEIGHT))
 
     # organize balls by team
     team_ids = sorted(set(cfg["team_id"] for cfg in team_configs))
@@ -12241,7 +12252,7 @@ def tag_team_mode(team_configs, arena_idx=0):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
                     tag_team_mode(team_configs, arena_idx)
@@ -13027,7 +13038,7 @@ def main():
     saved_game_mode = None
     while True:
         WIDTH, HEIGHT = BASE_WIDTH, BASE_HEIGHT
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        screen = _set_mode((WIDTH, HEIGHT))
         result = setup_menu(saved_teams, saved_num_teams, saved_arena_idx, saved_game_mode)
         team_configs, saved_teams, saved_num_teams, saved_arena_idx, saved_game_mode = result
         if team_configs == "tournament":
