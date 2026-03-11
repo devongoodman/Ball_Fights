@@ -1,7 +1,7 @@
 [app]
 title = Ball Fights
 package.name = ballfights
-package.domain = com.devongoodman.games
+package.domain = com.goodmandev
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf
 version = 1.0.0
