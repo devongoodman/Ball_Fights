@@ -2,17 +2,26 @@ import pygame
 import random
 import math
 import sys
-import subprocess
 import os
+
+# Detect Android
+ANDROID = "ANDROID_ARGUMENT" in os.environ or "ANDROID_ROOT" in os.environ
+
+if not ANDROID:
+    import subprocess
 
 pygame.init()
 
 # ── Recording helpers ────────────────────────────────────────
-FFMPEG_PATH = os.path.join(os.environ.get("LOCALAPPDATA", ""),
-    "Microsoft", "WinGet", "Packages",
-    "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe",
-    "ffmpeg-8.0.1-full_build", "bin", "ffmpeg.exe")
-DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
+if ANDROID:
+    FFMPEG_PATH = ""
+    DOWNLOADS_DIR = ""
+else:
+    FFMPEG_PATH = os.path.join(os.environ.get("LOCALAPPDATA", ""),
+        "Microsoft", "WinGet", "Packages",
+        "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe",
+        "ffmpeg-8.0.1-full_build", "bin", "ffmpeg.exe")
+    DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
 
 
 def get_record_filename():
@@ -72,14 +81,21 @@ def stop_recording(proc):
         proc.wait()
 
 BASE_WIDTH, BASE_HEIGHT = 600, 450
-WIDTH, HEIGHT = BASE_WIDTH, BASE_HEIGHT
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
+if ANDROID:
+    _info = pygame.display.Info()
+    WIDTH, HEIGHT = _info.current_w, _info.current_h
+    if WIDTH <= 0 or HEIGHT <= 0:
+        WIDTH, HEIGHT = 1280, 720
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
+else:
+    WIDTH, HEIGHT = BASE_WIDTH, BASE_HEIGHT
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Ball Fights")
 clock = pygame.time.Clock()
-font = pygame.font.SysFont("Arial", 18)
-title_font = pygame.font.SysFont("Arial", 36)
-big_font = pygame.font.SysFont("Arial", 48)
-small_font = pygame.font.SysFont("Arial", 14)
+font = pygame.font.Font(None, 18)
+title_font = pygame.font.Font(None, 36)
+big_font = pygame.font.Font(None, 48)
+small_font = pygame.font.Font(None, 14)
 
 BASE_BALL_RADIUS = 25
 BALL_RADIUS = BASE_BALL_RADIUS
