@@ -23,18 +23,9 @@ jobs:
           restore-keys: |
             buildozer-v2-
 
-      - name: Generate keystore
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      - name: Decode keystore
         run: |
-          keytool -genkeypair \
-            -alias "$KEY_ALIAS" \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storetype PKCS12 \
-            -keystore ballfights.keystore \
-            -storepass "$KEYSTORE_PASSWORD" \
-            -dname "CN=Devon Goodman, OU=Dev, O=DevonGoodman, L=Unknown, ST=Unknown, C=US"
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ballfights.keystore
 
       - name: Build release with Buildozer Docker
         run: |
